@@ -116,6 +116,8 @@ class TrainMeanField:
 		self.mode = self.config["mode"]
 		self.beta_factor = self.config["beta_factor"]
 
+		self.mode_node_edge = self.config["mode_node_edge"]
+
 		# Network
 
 		if(self.problem_name == "TSP"):
@@ -355,7 +357,9 @@ class TrainMeanField:
 								mean_aggr = self.mean_aggr,
 							   EncoderModel = self.graph_mode, n_random_node_features = self.n_random_node_features,
 							   train_mode = self.config["train_mode"],
-							   graph_norm = self.graph_norm, bfloat16 = self.bfloat16, dataset_name = self.dataset_name)
+							   graph_norm = self.graph_norm, bfloat16 = self.bfloat16, dataset_name = self.dataset_name,
+							   mode=self.config["mode_node_edge"]
+							   )
 
 
 	def __init_optimizer_and_params(self):
@@ -461,11 +465,17 @@ class TrainMeanField:
 			input_graph_list, energy_graphs = self._prepare_graphs(jraph_graph_dict, mode = "val")
 
 			batched_graph = input_graph_list["graphs"][0]
-			X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
-			rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
-
 			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0])]}
-			t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
+
+			if self.mode_node_edge == "edge":
+				rand_node_features = jnp.ones((batched_graph.edges.shape[1], self.n_random_node_features))
+				X_prev = jnp.ones((batched_graph.edges.shape[1], 1))
+				t_idx_per_node = jnp.ones((batched_graph.edges.shape[1],1))
+			else:
+				rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
+				X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
+				t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
+				
 			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
 
 		elif(self.graph_mode == "U_net"):
@@ -1229,12 +1239,19 @@ class TrainMeanField:
 		### TODO implement this for more than oe device
 		graphs = jax.tree_map(lambda x: jnp.concatenate(x, axis = 0), graphs)
 		nodes = graphs.nodes
+		edges = graphs.edges
 		n_node = graphs.n_node
+		n_edge = graphs.n_edge
 		n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]
 		graph_idx = jnp.arange(n_graph)
 		total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-		node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
-		mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]
+		total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
+		if self.mode_node_edge == "edge":
+			edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
+			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), edge_graph_idx, n_graph) / n_edge[:, None,None]
+		else:
+			node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
+			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]
 		return mean_prob_per_graph[:-1]
 
 	def __calculate_reporting(self, graphs, normed_energies, gt_normed_energies, spin_log_probs, normed_free_energies=np.nan, prefix = ""):

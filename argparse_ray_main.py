@@ -7,9 +7,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true', help='Switch ray into local mode for debugging')
 parser.add_argument('--multi_gpu', action='store_true', help='wheter to use multi gpu or not, KEEP IT ALWAYS TRUE')
 parser.add_argument('--mode', default='Diffusion', choices = ["Diffusion"], help='Define the Approach')
-parser.add_argument('--EnergyFunction', default='MIS', choices = ["MaxCut", "MIS", "MVC", "MaxCl", "WMIS", "MDS", "MaxClv2", "TSP", "IsingModel", "SpinGlass", "SpinGlass"], help='Define the EnergyFunction of the IsingModel')
+parser.add_argument('--EnergyFunction', default='MIS', choices = ["MaxCut", "MIS", "MVC", "MaxCl", "WMIS", "MDS", "MaxClv2", "TSP", "IsingModel", "SpinGlass", "SpinGlass", "HCP"], help='Define the EnergyFunction of the IsingModel')
 parser.add_argument('--IsingMode', default='RB_iid_100', choices = ["Gset","BA_large","RB_iid_small", "RB_iid_dummy", "BA_dummy", "RB_iid_large" ,"RRG_200_k_=all", "BA_small","TSP_random_100", 
-                                                                    "TSP_random_20", "COLLAB", "IMDB-BINARY", "RB_iid_100_dummy" , "RB_iid_200", "RB_iid_100", "NxNLattice_4x4", "NxNLattice_8x8", "NxNLattice_16x16", "NxNLattice_10x10", "SpinGlassUniform_10x10", "SpinGlass_16x16", "NxNLattice_24x24", "NxNLattice_32x32"], help='Define the Training dataset')
+                                                                    "TSP_random_20", "COLLAB", "IMDB-BINARY", "RB_iid_100_dummy" , "RB_iid_200", "RB_iid_100", "NxNLattice_4x4", "NxNLattice_8x8", "NxNLattice_16x16", "NxNLattice_10x10", "SpinGlassUniform_10x10", "SpinGlass_16x16", "NxNLattice_24x24", "NxNLattice_32x32", "HCP_dummy"], help='Define the Training dataset')
 parser.add_argument('--graph_mode', default='normal', choices = ["normal", "TSPModel", "Transformer", "UNet"], help='Use U-Net or normal GNN, TSP model is a graph based implementation of the transformer, transformer is to be prefered')
 parser.add_argument('--train_mode', default='REINFORCE', choices = ["REINFORCE", "PPO", "Forward_KL"], help='Use U-Net or normal GNN')
 parser.add_argument('--AnnealSchedule', default='linear', choices = ["linear", "cosine", "exp"], help='Define the Annealing Schedule')
@@ -131,7 +131,10 @@ def meanfield_run():
     if(local_mode):
         import jax
         #jax.config.update('jax_platform_name', 'cpu')
-        run(flexible_config = {"jit": False}, overwrite = True)
+        if args.EnergyFunction == "MIS":
+            run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node"}, overwrite = True)
+        else:
+            run(flexible_config = {"jit": False, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge"}, overwrite = True)
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -256,7 +259,7 @@ def run( flexible_config, overwrite = True):
 
     config = {
         "mode": "Diffusion",  # either Diffusion or MeanField
-        "dataset_name": "RB_iid_small",
+        "dataset_name": "RB_iid_100",
         "problem_name": "MIS",
         "jit": True,
         "wandb": True,
@@ -319,7 +322,9 @@ def run( flexible_config, overwrite = True):
         "lr_schedule": "cosine",
         "TD_k": 3,
         "clip_value": 0.2,
-        "value_weighting": 0.65
+        "value_weighting": 0.65,
+
+        "mode_node_edge": "node"
     }
 
     if(overwrite):

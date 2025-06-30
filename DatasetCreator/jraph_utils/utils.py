@@ -126,7 +126,7 @@ def from_igraph_to_dir_jgraph_normed(igraph):
     jgraph = jraph.GraphsTuple(senders = senders, receivers = receivers, edges = edges, nodes = nodes, n_edge = n_edge , n_node = n_node, globals = globals )
     return jgraph
 
-def from_igraph_to_jgraph(igraph, zero_edges = True, double_edges = True, _np = np):
+def from_igraph_to_jgraph(igraph, zero_edges = True, double_edges = True, _np = np, globals=None):
     num_vertices = igraph.vcount()
     edge_arr = _np.array(igraph.get_edgelist())
     if(double_edges):
@@ -162,7 +162,8 @@ def from_igraph_to_jgraph(igraph, zero_edges = True, double_edges = True, _np = 
             edges = _np.array(edge_weights)
 
     nodes = _np.zeros((num_vertices, 1))
-    globals = _np.array([num_vertices])
+    if globals is None:
+        globals = _np.array([num_vertices])
     n_node = _np.array([num_vertices])
     n_edge = _np.array([receivers.shape[0]])
 

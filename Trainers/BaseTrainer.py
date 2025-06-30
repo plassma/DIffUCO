@@ -71,6 +71,8 @@ class Base(ABC):
         self.N_basis_states = self.config["N_basis_states"]
         self.batch_size = self.config["batch_size"]
 
+        self.mode_node_edge = self.config["mode_node_edge"]
+
         if self.problem_name == "TSP":
             self.config["edge_updates"] = True
             if "20" in self.dataset_name:
@@ -786,10 +788,16 @@ class Base(ABC):
     @partial(jax.jit, static_argnums=(0,))
     def _compute_aggr_utils(self, jraph_graph):
         nodes = jraph_graph.nodes
+        edges = jraph_graph.edges
         n_node = jraph_graph.n_node
+        n_edge = jraph_graph.n_edge
         n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]
         graph_idx = jnp.arange(n_graph)
         total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
+        total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
+        #if self.mode_node_edge == "edge":
+        #    edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
+        #    return edge_graph_idx, n_graph, total_num_edges
         node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
         return node_graph_idx, n_graph, total_num_nodes
 

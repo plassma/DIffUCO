@@ -91,7 +91,7 @@ class SolutionDatasetLoader:
         collate_function = self.pmap_collate
 
         self.dataset_train = dataset_train
-        self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = True, collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None
+        self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = self.config["mode_node_edge"] == "node", collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None # todo plassma: undo drop last
         self.dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if dataset_test != None else None
         self.dataloader_val = DataLoader(dataset_val, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if VAL_DATASET else None
         if(self.dataloader_train != None):
@@ -194,7 +194,7 @@ class SolutionDataset(Dataset):
         elif(os.path.exist(data_path)):
             base_path = data_path
         else:
-            base_path = os.path.dirname(os.getcwd()) + "/DiffUCO/DatasetCreator/loadGraphDatasets/DatasetSolutions/"
+            base_path = os.path.dirname(os.getcwd()) + "/DIffUCO/DatasetCreator/loadGraphDatasets/DatasetSolutions/"
 
         if self.relaxed:
             self.path = base_path + "no_norm/"
@@ -323,7 +323,7 @@ class SolutionDataset_InMemory(Dataset):
             base_path = data_path
             load_path = base_path + f"/no_norm/{self.dataset_name}/{self.mode}/{self.mode}/{self.seed}/{select_data_name}/indexed/"
         else:
-            base_path = os.path.dirname(os.getcwd()) + "/DiffUCO/DatasetCreator/loadGraphDatasets/DatasetSolutions/"
+            base_path = os.path.dirname(os.getcwd()) + "/DIffUCO/DatasetCreator/loadGraphDatasets/DatasetSolutions/"
 
             load_path = base_path + f"no_norm/{self.dataset_name}/{self.mode}/{self.seed}/{select_data_name}/indexed/"
         with open(load_path+ f"idx_{0}_solutions.pickle", "rb") as file:

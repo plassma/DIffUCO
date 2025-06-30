@@ -10,9 +10,10 @@ from .GsetDatasetGenerator import GsetDatasetGenerator
 from .IsingModelDatasetGenerator import NxNLattice
 from .SpinGlassDatasetGenerator import SpinGlassDataset
 from .SpinGlassUniformDatasetGenerator import SpinGlassUniformDataset
+from .HCPDatasetGenerator import HCPDatasetGenerator
 
 dataset_generator_registry = {"BA": BADatasetGenerator, "RB_iid": RBDatasetGenerator, "TSP": TSPDatasetGenerator, 
-							  "SpinGlass": SpinGlassDataset, "SpinGlassUniform": SpinGlassUniformDataset, "Gset": GsetDatasetGenerator, "NxNLattice": NxNLattice}
+							  "SpinGlass": SpinGlassDataset, "SpinGlassUniform": SpinGlassUniformDataset, "Gset": GsetDatasetGenerator, "NxNLattice": NxNLattice, "HCP_dummy": HCPDatasetGenerator}
 
 
 def get_dataset_generator(config):

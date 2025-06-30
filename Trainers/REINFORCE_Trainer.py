@@ -10,6 +10,7 @@ class Reinforce(Base):
         self.n_bernoulli_features = self.config["n_bernoulli_features"]
         self.n_diffusion_steps = self.config["n_diffusion_steps"]
         self.inner_update_steps = 1
+        self.mode = self.config["mode_node_edge"] # todo plassma: move 
 
         self.diffusion_loss_train = lambda a,b,c,d,e: self.diffusion_loss(a, b, c, d, e,  "train")
 
@@ -35,8 +36,11 @@ class Reinforce(Base):
         entropy_term_per_node = entropy_term_1 + entropy_term_2
 
         n_graph = jraph_graph.n_node.shape[0]
+        # working shapes MIS: [3151, 20, 1], [3151], 31
+        edge_gr_idx = node_gr_idx[jraph_graph.senders]
+        gr_idx = edge_gr_idx if self.mode == "edge" else node_gr_idx
         relaxed_entropies_per_graph = jax.ops.segment_sum(jnp.sum(entropy_term_per_node, axis=-1, keepdims=True),
-                                                          node_gr_idx, n_graph)
+                                                          gr_idx, n_graph) # todo plassma: crashes here, as random edges (nodes) are contained in entropy term, but not node_gr_index
 
         entropy_term_per_node_no_grad = jax.lax.stop_gradient(entropy_term_per_node)
         # baseline = jnp.mean(entropy_term_per_node_no_grad, axis = -1, keepdims=True)
@@ -47,8 +51,8 @@ class Reinforce(Base):
         # L_REINFORCE_per_node = (entropy_term_per_node_no_grad -  baseline)*sum_log_p_prev_per_node
         # L_REINFORCE_per_graph = jax.ops.segment_sum(L_REINFORCE_per_node, node_gr_idx, n_graph)
 
-        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, node_gr_idx, n_graph), axis=-1)
-        entropy_per_State = jnp.sum(jax.ops.segment_sum(entropy_term_per_node_no_grad, node_gr_idx, n_graph), axis=-1)
+        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, gr_idx, n_graph), axis=-1)
+        entropy_per_State = jnp.sum(jax.ops.segment_sum(entropy_term_per_node_no_grad, gr_idx, n_graph), axis=-1)
         # print("here entropy", baseline_per_graph.shape, entropy_per_State.shape, log_state_prob.shape, relaxed_entropies_per_graph.shape)
         L_REINFORCE_per_graph = (entropy_per_State - baseline_per_graph) * log_state_prob
         L_REINFORCE = jnp.mean(L_REINFORCE_per_graph[:-1])
@@ -69,14 +73,16 @@ class Reinforce(Base):
                                                                                                       spin_logits,
                                                                                                       node_gr_idx)
 
-        HA = jnp.mean(HA_per_graph[:-1])
-        HB = jnp.mean(HB_per_graph[:-1])
+        HA = jnp.mean(HA_per_graph) # todo plassma: removed [:-1]
+        HB = jnp.mean(HB_per_graph) # todo plassma: removed [:-1]
         Energy_dict = {"HA": HA, "HB": HB, "HA + HB": HA + HB}
 
         relaxed_energies_per_graph_no_grad = jax.lax.stop_gradient(relaxed_energies_per_graph)
         baseline_per_graph = jax.lax.stop_gradient(jnp.mean(relaxed_energies_per_graph, axis=1, keepdims=True))
 
-        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, node_gr_idx, n_graph), axis=-1,
+        edge_gr_idx = node_gr_idx[jraph_graph.senders]
+
+        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, edge_gr_idx, n_graph), axis=-1,
                                  keepdims=True)
         # print("here energy", relaxed_energies_per_graph_no_grad.shape, baseline_per_graph.shape, log_state_prob.shape)
         L_REINFORCE_per_graph = (relaxed_energies_per_graph_no_grad - baseline_per_graph) * log_state_prob
@@ -102,9 +108,9 @@ class Reinforce(Base):
         #baseline = jnp.mean(noise_energy_per_node_no_grad, axis = -2, keepdims=True)
         baseline_per_graph = jax.lax.stop_gradient(jnp.mean(Noise_Energy_per_graph, axis = 1, keepdims=True))
         #print("baseline noise",noise_energy_per_node_no_grad.shape,  baseline.shape)
-
-
-        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, node_gr_idx, n_graph), axis = -1)
+        edge_gr_idx = node_gr_idx[jraph_graph.senders]
+        gr_idx = node_gr_idx if self.mode == "node" else edge_gr_idx
+        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, gr_idx, n_graph), axis = -1)
         #print("here noise engery", noise_energy_per_graph_no_grad.shape,log_state_prob,  baseline_per_graph.shape)
 
         L_REINFORCE_per_graph = (noise_energy_per_graph_no_grad-baseline_per_graph)*log_state_prob
@@ -159,7 +165,11 @@ class Reinforce(Base):
 
         for i in range(overall_diffusion_steps):
             model_step_idx = jnp.array([i / self.eval_step_factor], dtype=jnp.int16)
-            model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1),
+            if self.mode_node_edge == "edge":
+                model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.edges.shape[0], 1),
+                                                                   dtype=jnp.int16)
+            else:
+                model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1),
                                                                    dtype=jnp.int16)
             key, subkey = jax.random.split(key)
             batched_key = jax.random.split(subkey, num=X_prev.shape[1])
@@ -255,7 +265,10 @@ class Reinforce(Base):
         energy_graph_batch = scan_dict["energy_graph_batch"]
 
         model_step_idx = jnp.array([i / self.eval_step_factor], dtype=jnp.int16)
-        model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1), dtype=jnp.int16)
+        if self.mode == "edge":
+            model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.edges.shape[0], 1), dtype=jnp.int16)
+        else:
+            model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1), dtype=jnp.int16)
 
         key, subkey = jax.random.split(scan_dict["key"])
         scan_dict["key"] = key

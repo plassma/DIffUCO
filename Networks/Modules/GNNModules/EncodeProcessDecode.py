@@ -216,12 +216,14 @@ class EncodeProcessDecode(nn.Module):
 	weight_tied: bool = True
 	mean_aggr: bool = False
 	graph_norm: bool = False
+	mode: str = "edge"
 
 	def setup(self):
 		self.node_encoder = ReluMLP(n_features_list=self.n_features_list_encode, dtype = self.dtype)
 		self.edge_encoder = ReluMLP(n_features_list=self.n_features_list_encode, dtype = self.dtype)
 
 		self.node_decoder = ReluMLP(n_features_list=self.n_features_list_decode, dtype = self.dtype)
+		self.edge_decoder = ReluMLP(n_features_list=self.n_features_list_decode, dtype = self.dtype)
 
 		process_block = []
 
@@ -249,21 +251,32 @@ class EncodeProcessDecode(nn.Module):
 
 		@returns: decoded nodes after encode-process-decode procedure
 		"""
-		nodes = X_prev
+		
 		jraph_graph = jraph_graph_list["graphs"][0]
-		nodes_encoded = self.node_encoder(nodes)
-		jraph_graph = jraph_graph._replace(nodes=nodes_encoded)
+		
+		if self.mode == "edge":
+			edges = X_prev
+			edges_encoded = self.edge_encoder(edges)
+			jraph_graph._replace(edges=edges_encoded)
+		else:
+			nodes = X_prev
+			nodes_encoded = self.node_encoder(nodes)
+			jraph_graph = jraph_graph._replace(nodes=nodes_encoded)
 
-		if(self.edge_updates):
+		if(self.edge_updates and self.mode != "edge"): # todo plassma: edge updating breaks
 			edges = jraph_graph.edges
 			edges_encoded = self.edge_encoder(edges)
 			jraph_graph = jraph_graph._replace(edges=edges_encoded)
 
 		for message_pass in self.process_block:
 			jraph_graph = message_pass(jraph_graph)
-
-		decoded_nodes = self.node_decoder(jraph_graph.nodes)
-		return decoded_nodes
+		if self.mode == "edge":
+			decoded_edges = self.edge_decoder(jraph_graph.edges)
+			return decoded_edges # (11551, 64)
+		else:
+			decoded_nodes = self.node_decoder(jraph_graph.nodes)
+			return decoded_nodes #(3151, 64)
+			
 
 class GINConv(nn.Module):
 	"""

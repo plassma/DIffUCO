@@ -1,6 +1,6 @@
 import sys
 sys.path.append("..")
-
+from pathlib import Path
 from DatasetCreator.loadGraphDatasets import get_dataset_generator
 
 import argparse
@@ -8,21 +8,22 @@ import argparse
 RB_datasets = ["RB_iid_200", "RB_iid_100", "RB_iid_small", "RB_iid_large", "RB_iid_giant", "RB_iid_huge", "RB_iid_dummy"]
 BA_datasets = ["BA_small", "BA_large", "BA_huge", "BA_giant", "BA_dummy"]
 TSP_datasets = ['TSP_random_100', "TSP_random_20"]
+HCP_datasets = ["HCP_dummy"]
 Gset = ["Gset"]
 IsingModel = ["NxNLattice_4x4", "NxNLattice_8x8", "NxNLattice_10x10", "NxNLattice_16x16", "NxNLattice_24x24", "NxNLattice_32x32"]
 SpinGlassdataset = ["SpinGlass_10x10", "SpinGlass_16x16"]
 SpinGlassUniformdataset = ["SpinGlassUniform_10x10"]
-dataset_choices =  RB_datasets + BA_datasets + TSP_datasets + Gset + IsingModel + SpinGlassdataset + SpinGlassUniformdataset
+dataset_choices =  RB_datasets + BA_datasets + TSP_datasets + Gset + IsingModel + SpinGlassdataset + SpinGlassUniformdataset + HCP_datasets
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--licence_path', default="/system/user/sanokows/", type = str, help='licence base path')
+parser.add_argument('--licence_path', default=Path.home(), type = str, help='licence base path')
 parser.add_argument('--seed', default=[123], type = int, help='Define dataset seed', nargs = "+")
 parser.add_argument('--parent', default=False, type = bool, help='use parent directory or not')
 parser.add_argument('--save', default=False, type = bool, help='save the entire dataset in a pickle file or not')
 parser.add_argument('--gurobi_solve', default=True, type = bool, help='whether to solve instances with gurobi or not')
 parser.add_argument('--datasets', default=['RB_iid_small'], choices = dataset_choices, help='Define the dataset', nargs="+")
 parser.add_argument('--diff_ps', default=False, type = bool, help='')
-parser.add_argument('--problems', default=['MIS'], choices = ["MIS", "MVC", "MaxCl", "MaxCut", "MDS", "TSP", "IsingModel", "SpinGlass"], help='Define the CO problem', nargs="+")
+parser.add_argument('--problems', default=['MIS'], choices = ["MIS", "MVC", "MaxCl", "MaxCut", "MDS", "TSP", "IsingModel", "SpinGlass", "HCP"], help='Define the CO problem', nargs="+")
 parser.add_argument('--modes', default=[ "test", "train", "val"], type = str, help='Define dataset split', nargs = "+")
 parser.add_argument('--time_limits', default=["inf", "0.1", "1."], type = str, help='Gurobi Time Limit for each [mode]', nargs = "+")
 parser.add_argument('--thread_fraction', default=0.75, type = float, help='Thread fraction for gurobi')

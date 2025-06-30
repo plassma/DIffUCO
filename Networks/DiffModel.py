@@ -38,6 +38,7 @@ class DiffModel(nn.Module):
 	graph_norm: bool = False
 	bfloat16: bool = False
 	dataset_name: str = "None"
+	mode: str = "edge"
 
 
 
@@ -59,7 +60,8 @@ class DiffModel(nn.Module):
 																 weight_tied=self.message_passing_weight_tied,
 																 linear_message_passing=self.linear_message_passing,
 																 mean_aggr = self.mean_aggr,
-																 graph_norm = self.graph_norm)
+																 graph_norm = self.graph_norm,
+																 mode = self.mode)
 		else:
 			import re
 			def extract_integer(input_string):
@@ -72,7 +74,7 @@ class DiffModel(nn.Module):
 			size = extract_integer(self.dataset_name)
 
 			self.encode_process_decode = GNNModel(size = size, features=self.n_features_list_nodes[0],
-																 n_layers=self.n_message_passes
+																 n_layers=self.n_message_passes, mode=self.mode
 																 )
 
 		self.HeadModel = HeadModel(n_features_list_prob=self.n_features_list_prob, dtype = dtype)
@@ -84,7 +86,7 @@ class DiffModel(nn.Module):
 	@flax.linen.jit
 	def __call__(self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key):
 		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node)
-		embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
+		embeddings = self.encode_process_decode(jraph_graph_list, X_prev) #(11551, 1, 64) | (3151, 1, 64)
 
 		bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis = -2)
 		embeddings = bernoulli_embeddings
@@ -92,19 +94,26 @@ class DiffModel(nn.Module):
 		out_dict = {}
 		out_dict = self.HeadModel(jraph_graph_list, embeddings, out_dict)
 
-		out_dict["rand_node_features"] = rand_node_features
+		out_dict["rand_node_features"] = rand_node_features #(11551, 1, 2) | (3151, 1, 2)
 		return out_dict, key
 
 	#@partial(flax.linen.jit, static_argnums=0)
 	def get_graph_info(self, jraph_graph_list):
 		first_graph = jraph_graph_list["graphs"][0]
 		nodes = first_graph.nodes
+		edges = first_graph.edges
 		n_node = first_graph.n_node
+		n_edge = first_graph.n_edge
 		n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]
 		graph_idx = jnp.arange(n_graph)
 		total_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
+		total_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
 		node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_nodes)
-		return node_graph_idx, n_graph, n_node
+		edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_edges)
+		if self.mode == "edge":
+			return edge_graph_idx, n_graph, n_edge
+		else:
+			return node_graph_idx, n_graph, n_node
 
 	@partial(flax.linen.jit, static_argnums=0)
 	def reinit_rand_nodes(self, X_t,  key):
@@ -138,10 +147,10 @@ class DiffModel(nn.Module):
 		X_next, spin_log_probs, key = self.sample_from_model( spin_logits, key)
 		
 		graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)/(n_node))[:-1]))
-		out_dict["X_next"] = X_next
-		out_dict["spin_log_probs"] = spin_log_probs
-		out_dict["state_log_probs"] = self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)
-		out_dict["graph_log_prob"] = graph_log_prob
+		out_dict["X_next"] = X_next # [3151, 1]
+		out_dict["spin_log_probs"] = spin_log_probs # [3151, 1]
+		out_dict["state_log_probs"] = self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph) # 31
+		out_dict["graph_log_prob"] = graph_log_prob # 30
 		return out_dict, key
 
 	@partial(flax.linen.jit, static_argnums=0)
@@ -242,8 +251,12 @@ class DiffModel(nn.Module):
 
 	@partial(flax.linen.jit, static_argnums=(0,2))
 	def sample_prior(self, j_graph, N_basis_states, key):
-		nodes = j_graph.nodes
-		shape = (nodes.shape[0], N_basis_states, 1)
+		if self.mode == "edge":
+			edges = j_graph.edges
+			shape = (edges.shape[0], N_basis_states, 1)
+		else:
+			nodes = j_graph.nodes # todo plassma: edge mode
+			shape = (nodes.shape[0], N_basis_states, 1)
 
 		key, subkey = jax.random.split(key)
 		log_p_uniform = self._get_prior(shape)

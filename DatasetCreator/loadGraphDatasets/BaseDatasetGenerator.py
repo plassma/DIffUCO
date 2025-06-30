@@ -137,22 +137,25 @@ class BaseDatasetGenerator(ABC):
 
 			if self.problem == "MaxCl":
 				H_graph_compl = jutils.from_igraph_to_jgraph(g.complementer(loops=False), double_edges=False)
-			elif self.problem == "MIS" or self.problem == "MVC" or self.problem == "MaxCut":
-				H_graph_compl = jutils.from_igraph_to_jgraph(g, double_edges=False)
+			elif self.problem == "MIS" or self.problem == "MVC" or self.problem == "MaxCut" or self.problem == "HCP":
+				H_graph_compl = jutils.from_igraph_to_jgraph(g, double_edges=False, globals=H_graph.globals) # double_edges=energy_graph_batch.edges.shape[0]
 			else:
 				H_graph_compl = None
 			return Energy, boundEnergy, solution, runtime, H_graph_compl
 
-	def igraph_to_jraph(self, g: ig.Graph) -> (jraph.GraphsTuple, float, int):
+	def igraph_to_jraph(self, g: ig.Graph, double_edges: bool = True, globals=None) -> (jraph.GraphsTuple, float, int):
 		"""
 		Convert igraph graph to jraph graph
 
 		:param g: igraph graph
 		:return: (H_graph, density, graph_size)
 		"""
-		density = 2 * g.ecount() / (g.vcount() * (g.vcount() - 1))
+		if double_edges:
+			density = 2 * g.ecount() / (g.vcount() * (g.vcount() - 1))
+		else:
+			density = g.ecount() / (g.vcount() * (g.vcount() - 1))
 		graph_size = g.vcount()
-		return jutils.from_igraph_to_jgraph(g), density, graph_size
+		return jutils.from_igraph_to_jgraph(g, globals=globals, double_edges=double_edges), density, graph_size
 
 	def nx_to_jraph(self, gnx: nx.Graph) -> (jraph.GraphsTuple, float, int):
 		"""
