@@ -15,14 +15,14 @@
         },
         {
             "name": "Generate HCP DUMMY",
-            "cwd": "DatasetCreator",
+            "cwd": "/system/user/publicwork/mplasser/DIffUCO/DatasetCreator",
             "type": "debugpy",
             "request": "launch",
             "program": "prepare_datasets.py",
             "args": ["--dataset", "HCP_dummy", "--problem", "HCP"],
         },
         {
-            "name": "DiffUCO MIS",
+            "name": "DiffUCO MIS dbg",
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",

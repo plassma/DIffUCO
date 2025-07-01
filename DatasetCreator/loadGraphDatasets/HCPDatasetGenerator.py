@@ -34,7 +34,7 @@ class HCProblem:
 		edges_RxC = [[r + HCProblem.OFFSET_ROOMS, c + HCProblem.OFFSET_CABINETS] for r in range(self.rooms) for c in range(self.cabinets)]
 		edges_CxT = [[c + HCProblem.OFFSET_CABINETS, t + HCProblem.OFFSET_THINGS] for c in range(self.cabinets) for t in range(self.things)]
 		edges_PxR = [[p + HCProblem.OFFSET_PERSONS, r + HCProblem.OFFSET_ROOMS] for p in range(self.persons) for r in range(self.rooms)]
-		edges_TxP = [[t + HCProblem.OFFSET_THINGS, p + HCProblem.OFFSET_PERSONS] for t in range(self.things) for p in range(self.persons)]
+		edges_TxP = [[t + p * 10 + HCProblem.OFFSET_THINGS, p + HCProblem.OFFSET_PERSONS] for p in range(self.persons) for t in range(10) ]
 		all_edges = edges_RxC + edges_CxT + edges_PxR + edges_TxP
 		
 		return ig.Graph(n=HCProblem.N_NODES, edges=all_edges)
