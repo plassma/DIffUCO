@@ -134,7 +134,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node"}, overwrite = True)
         else:
-            run(flexible_config = {"jit": False, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge"}, overwrite = True)
+            run(flexible_config = {"jit": True, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge"}, overwrite = True)
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -187,6 +187,8 @@ def detect_and_run_for_loops():
                                                     raise ValueError("args.batch_size%len(args.GPUs) should be zero!")
 
                                             flexible_config = {
+                                                "edge_updates": True, 
+                                                "mode_node_edge": "edge",
                                                 "mode": args.mode,
                                                 "dataset_name": args.IsingMode,
                                                 "problem_name": args.EnergyFunction,

@@ -49,13 +49,13 @@ class HCPEnergyClass(BaseEnergyClass):
         things_to_person = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS), bins, 1)
         loss_things_to_person = jax.ops.segment_sum((1-things_to_person) ** 2, edge_gr_idx, n_graph)
         
-        person_of_thing = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS) & bins, H_graph.globals[H_graph.receivers], -1)
+        person_of_thing = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS), H_graph.globals[H_graph.receivers], -1)
 
-        person_of_room = jnp.where((H_graph.globals[H_graph.senders] == PERSONS) & (H_graph.globals[H_graph.receivers] == ROOMS) & bins, H_graph.globals[H_graph.senders], -1)
-        person_of_cabinet = jnp.where((H_graph.globals[H_graph.senders] == ROOMS) & (H_graph.globals[H_graph.receivers] == CABINETS) & bins, person_of_room, -1)
-        person_of_thing_in_cabinet = jnp.where((H_graph.globals[H_graph.senders] == CABINETS) & (H_graph.globals[H_graph.receivers] == THINGS) & bins, person_of_cabinet, -1)
+        person_of_room = jnp.where((H_graph.globals[H_graph.senders] == PERSONS) & (H_graph.globals[H_graph.receivers] == ROOMS), H_graph.globals[H_graph.senders], -1)
+        person_of_cabinet = jnp.where((H_graph.globals[H_graph.senders] == ROOMS) & (H_graph.globals[H_graph.receivers] == CABINETS), person_of_room, -1)
+        person_of_thing_in_cabinet = jnp.where((H_graph.globals[H_graph.senders] == CABINETS) & (H_graph.globals[H_graph.receivers] == THINGS), person_of_cabinet, -1)
 
-        loss_thing_in_owned_cabinet = jax.ops.segment_sum((person_of_thing_in_cabinet != person_of_thing).astype(int), edge_gr_idx, n_graph)
+        loss_thing_in_owned_cabinet = jax.ops.segment_sum((person_of_thing_in_cabinet != person_of_thing).astype(int) * bins, edge_gr_idx, n_graph)
 
         Energy = jnp.reshape(jax.ops.segment_sum(loss_cabinets_to_things + loss_rooms_to_cabinets + loss_rooms_to_persons, node_gr_idx, n_graph), (n_graph, 1)) + jnp.reshape(loss_things_to_person + loss_thing_in_owned_cabinet, (n_graph, 1)) + 0.0001
 
@@ -70,6 +70,6 @@ class HCPEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx):
-        #p = jnp.exp(logits[...,1]) # 3151, 1 != 11151, 1, 2
-        p = logits[..., 1]
+        p = jnp.exp(logits[...,1]) # 3151, 1 != 11151, 1, 2
+        #p = logits[..., 1]
         return self.calculate_Energy(H_graph, p, node_gr_idx)
