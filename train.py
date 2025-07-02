@@ -18,7 +18,7 @@ from jraph_utils import pmap_batch_U_net_graph_dict_and_pad
 from utils.lr_schedule import cos_schedule
 from EnergyFunctions import get_Energy_class
 from MCMC import MCMCSampler
-
+from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot_graph
 from Data.LoadGraphDataset import SolutionDatasetLoader
 from jax.tree_util import tree_flatten
 import time
@@ -26,6 +26,7 @@ import jraph_utils
 from utils import reshape_utils
 from utils import dict_count
 import os
+import igraph as ig
 
 import warnings
 
@@ -39,6 +40,12 @@ import warnings
 import warnings
 warn = 'This is a warning'
 exception = 'This is an exception'
+
+ROOMS = 0
+CABINETS = 1
+THINGS = 2
+PERSONS = 3
+VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
 
 def main():
     warnings.warn(warn)
@@ -843,6 +850,11 @@ class TrainMeanField:
 
 		wandb.log(eval_log_dict)
 
+	def show_graph(self, graph_batch, log_dict):
+		edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(log_dict["X_0"][0,:,2,0]) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
+		graph = ig.Graph(edges=edges)
+		plot_graph(graph, graph_batch["graphs"][0].globals[0])
+
 	def test(self, mode = "test"):
 
 		dataloader = self.dataloader_test
@@ -867,6 +879,8 @@ class TrainMeanField:
 			batched_key = jax.random.split(subkey, num = len(jax.devices()))
 
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode)
+
+			self.show_graph(graph_batch, log_dict)
 
 			time_dict["forward_pass"].append(log_dict["time"]["forward_pass"])
 			time_dict["CE"].append(log_dict["time"]["CE"])

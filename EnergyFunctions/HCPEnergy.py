@@ -49,6 +49,14 @@ class HCPEnergyClass(BaseEnergyClass):
         things_to_person = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS), bins, 1)
         loss_things_to_person = jax.ops.segment_sum((1-things_to_person) ** 2, edge_gr_idx, n_graph)
         
+
+        rest = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS), 0, bins)
+        loss_rest = jax.ops.segment_sum(rest ** 2, edge_gr_idx, n_graph) # todo: bins just added experimentally here
+
+        jax.debug.print("loss things_to_person {}", loss_things_to_person.mean())
+        jax.debug.print("loss rest {}", loss_rest.mean())
+        jax.debug.print("rest mean {}", rest.mean())
+
         person_of_thing = jnp.where((H_graph.globals[H_graph.senders] == THINGS) & (H_graph.globals[H_graph.receivers] == PERSONS), H_graph.globals[H_graph.receivers], -1)
 
         person_of_room = jnp.where((H_graph.globals[H_graph.senders] == PERSONS) & (H_graph.globals[H_graph.receivers] == ROOMS), H_graph.globals[H_graph.senders], -1)
@@ -57,7 +65,8 @@ class HCPEnergyClass(BaseEnergyClass):
 
         loss_thing_in_owned_cabinet = jax.ops.segment_sum((person_of_thing_in_cabinet != person_of_thing).astype(int) * bins, edge_gr_idx, n_graph)
 
-        Energy = jnp.reshape(jax.ops.segment_sum(loss_cabinets_to_things + loss_rooms_to_cabinets + loss_rooms_to_persons, node_gr_idx, n_graph), (n_graph, 1)) + jnp.reshape(loss_things_to_person + loss_thing_in_owned_cabinet, (n_graph, 1)) + 0.0001
+        #Energy = jnp.reshape(jax.ops.segment_sum(loss_cabinets_to_things + loss_rooms_to_cabinets + loss_rooms_to_persons, node_gr_idx, n_graph), (n_graph, 1)) + jnp.reshape(loss_things_to_person + loss_thing_in_owned_cabinet, (n_graph, 1)) + 0.0001
+        Energy = jnp.reshape(loss_things_to_person + loss_rest, (n_graph, 1)) + 0.0001
 
         
         #jax.debug.print("Energy {}", jnp.mean(Energy))
@@ -70,6 +79,9 @@ class HCPEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx):
-        p = jnp.exp(logits[...,1]) # 3151, 1 != 11151, 1, 2
-        #p = logits[..., 1]
+        # p = jnp.exp(logits[...,1]) # 3151, 1 != 11151, 1, 2
+        #if logits.dtype == np.int32 or True: # int probably provides no learning signal, but maybe exp is not needed
+        p = jnp.exp(logits[...,1])
+        #else:
+        #    p = logits.argmax(-1) # int probably provides no learning signal
         return self.calculate_Energy(H_graph, p, node_gr_idx)

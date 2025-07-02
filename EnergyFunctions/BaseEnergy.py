@@ -548,7 +548,7 @@ class BaseEnergyClass(ABC):
 @jax.jit
 def sort_ps(graphs, ps, node_graph_idx):
 
-    shifted_ps = -ps + node_graph_idx[:,None]
+    shifted_ps = -ps + node_graph_idx[graphs.senders,None]
     #sorted_ps = jax.lax.sort(shifted_ps, dimension = 0)
     p_idxs = jax.numpy.argsort(shifted_ps, axis = 0, stable = False)
 
@@ -563,7 +563,7 @@ def sort_violations(graphs, HB_per_node):
     total_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
     node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_nodes)
 
-    shifted_HB_per_node = -HB_per_node/(jnp.max(HB_per_node)+1.) + node_graph_idx[:,None]
+    shifted_HB_per_node = -HB_per_node/(jnp.max(HB_per_node)+1.) + node_graph_idx[graphs.senders,None]
     #sorted_ps = jax.lax.sort(shifted_ps, dimension = 0)
     HB_per_node_idxs = jax.numpy.argsort(shifted_HB_per_node, axis = 0)
 

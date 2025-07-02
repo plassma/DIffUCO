@@ -46,9 +46,9 @@ class ConditionalExpectation:
         else:
             base_path = os.path.dirname(os.getcwd())
 
-        self.path_results = base_path + "/DiffUCO/CE_results"
+        self.path_results = base_path + "/DIffUCO/CE_results"
 
-        self.path_to_models = base_path + "/DiffUCO/Checkpoints"
+        self.path_to_models = base_path + "/DIffUCO/Checkpoints"
         # self.path_to_models = "/system/user/publicwork/sanokows/meanfield_annealing/Checkpoints"
 
         self.n_eval_samples = n_eval_samples

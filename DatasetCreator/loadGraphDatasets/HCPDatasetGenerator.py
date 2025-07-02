@@ -6,6 +6,7 @@ from DatasetCreator.jraph_utils import utils as jutils
 from tqdm import tqdm
 import numpy as np
 import igraph as ig
+import matplotlib.pyplot as plt
 
 @dataclass
 class HCProblem:
@@ -62,7 +63,15 @@ class HCProblem:
 DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]), HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
 			   HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
 
+VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
 
+def plot_graph(igraph, globals):
+	omit_nodes = (globals == -1).cumsum()
+	globals_compact = globals[np.where(globals > -1)]
+	edges = igraph.get_edgelist()
+	edges = [(a - omit_nodes[a], b - omit_nodes[b]) for a, b in edges]
+	plot_graph = ig.Graph(edges=edges)
+	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for t in globals_compact], target="plot.png")
 
 class HCPDatasetGenerator(BaseDatasetGenerator):
 	"""
@@ -99,6 +108,8 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			g = problem.igraph
 
 			globals = problem.globals
+
+			plot_graph(g, globals)
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g, double_edges=False, globals=globals)
 
