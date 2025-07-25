@@ -1272,7 +1272,7 @@ class TrainMeanField:
 		total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
 		if self.mode_node_edge == "edge":
 			edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
-			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), edge_graph_idx, n_graph) / n_edge[:, None,None]
+			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), edge_graph_idx, n_graph) / n_edge[:, None,None] # (np.array([graphs.globals["group_ids"].max(), 0]) + 1)[:, None, None]
 		else:
 			node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
 			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]
