@@ -1,0 +1,5 @@
+sample_prior returns wrong log_p
+
+does inmemory dataset call pickle.load in every getitem op??
+
+why is logprob in diffModel.sample_prior not 0 for groups with size 1?

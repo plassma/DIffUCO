@@ -130,11 +130,13 @@ def meanfield_run():
     #run_PPO_experiment_func = lambda flex_conf: run_PPO_experiment_hydra()
     if(local_mode):
         import jax
+        #jax.config.update("jax_debug_nans", True)
+        #jax.config.update("jax_debug_infs", True)
         #jax.config.update('jax_platform_name', 'cpu')
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node"}, overwrite = True)
         else:
-            run(flexible_config = {"jit": False, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": 300}, overwrite = True)
+            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": 300, "load_wandb_id": None,"n_random_node_features": 16}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -326,7 +328,8 @@ def run( flexible_config, overwrite = True):
         "clip_value": 0.2,
         "value_weighting": 0.65,
 
-        "mode_node_edge": "node"
+        "mode_node_edge": "node",
+        "load_wandb_id": None
     }
 
     if(overwrite):
@@ -344,7 +347,7 @@ def run( flexible_config, overwrite = True):
     # from jax import config
     # config.update("jax_enable_x64", True)
 
-    train = TrainMeanField(config)
+    train = TrainMeanField(config, config.get("load_wandb_id", None), load_best_parameters="load_wandb_id" in config)
 
     train.train()
 

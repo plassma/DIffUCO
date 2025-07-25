@@ -280,7 +280,7 @@ class BaseEnergyClass(ABC):
 
         @jax.jit
         def body_feas(arg):
-            step, X_0, _, Hb_per_node, cum_sum, graphs, node_graph_idx, max_steps, cum_max_sum, p_idxs = arg
+            step, X_0, _, Hb_per_node, cum_sum, graphs, node_graph_idx, max_steps, cum_max_sum, p_idxs = arg # X_0 abnormal shape: [N], normal shape: [N, 1]
 
             sorted_cum_sum_idxs = p_idxs[cum_sum]
 

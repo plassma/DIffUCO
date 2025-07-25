@@ -104,6 +104,7 @@ class ConditionalExpectation:
 
     def __load_network(self):
         self.params, self.config  = self.__load_params()
+        self.config["jit"] = False # todo plassma: permanently disabled jit
         print("loaded", jax.tree_map(lambda x: x.shape, self.params))
         self.params = jax.tree_map(lambda x: x[0], self.params)
         self.params = jax.device_put_replicated(self.params, list(jax.devices()))
@@ -404,6 +405,7 @@ if __name__ == "__main__":
     for wandb_id in args.wandb_id:
         for evaluation_factor in args.evaluation_factors:
             config = {
+                "jit": False,
                 "wandb_id": wandb_id,
                 "dataset": args.dataset,
                 "evaluation_factor": evaluation_factor,

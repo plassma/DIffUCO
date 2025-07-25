@@ -76,6 +76,7 @@ class ProbMLP(nn.Module):
 	"""
 	n_features_list: np.ndarray
 	dtype: any
+	mode: str = "normal"
 
 	def setup(self):
 		layers = []
@@ -87,8 +88,8 @@ class ProbMLP(nn.Module):
 			layers.append(nn.LayerNorm(dtype = self.dtype))
 		# add output layer
 		layers.append(nn.Dense(features=self.n_features_list[-1], dtype = jnp.float32))
-		layers.append(lambda x: jax.nn.log_softmax(x, axis=-1))
-
+		if self.mode == "normal":
+			layers.append(lambda x: jax.nn.log_softmax(x, axis=-1))
 		self.mlp = nn.Sequential(layers)
 
 	def __call__(self, x: jnp.ndarray) -> jnp.ndarray:

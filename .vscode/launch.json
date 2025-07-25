@@ -2,7 +2,7 @@
     // Use IntelliSense to learn about possible attributes.
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    // python argparse_ray_main.py --lrs 0.002 --GPUs 4 --n_GNN_layers 8 --temps 0.6 --IsingMode HCP_dummy --EnergyFunction HCP --N_anneal 2000 --n_diffusion_steps 3 --batch_size 20 --n_basis_states 10 --noise_potential bernoulli --project_name FirstRuns --seed 123 --debug
+    // python argparse_ray_main.py --lrs 0.002 --GPUs 4 --n_GNN_layers 8 --temps 0.6 --IsingMode HCP_dummy --EnergyFunction HCP --N_anneal 2000 --n_diffusion_steps 3 --batch_size 20 --n_basis_states 10 --noise_potential bernoulli --project_name FirstRunsHCP --seed 123 --debug
     "version": "0.2.0",
     "configurations": [
         {
@@ -36,7 +36,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",
-            "args": ["--lrs", "0.002", "--GPUs", "4", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "bernoulli", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug"],
+            "args": ["--lrs", "0.002", "--GPUs", "1", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "bernoulli", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--no-jit"],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             }
@@ -46,7 +46,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "ConditionalExpectation.py",
-            "args": ["--wandb_id", "wn63b69x", "--dataset", "HCP_dummy", "--GPU", "4", "--evaluation_factor", "3", "--n_samples", "10"],
+            "args": ["--wandb_id", "q4qtphuk", "--dataset", "HCP_dummy", "--GPU", "0", "--evaluation_factor", "1", "--n_samples", "10"],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             }

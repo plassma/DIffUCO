@@ -44,5 +44,5 @@ class MISEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx):
-        p = jnp.exp(logits[...,1]) # shape: 3151, 1
+        p = jnp.exp(logits[...,1])
         return self.calculate_Energy(H_graph, p, node_gr_idx)

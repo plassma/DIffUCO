@@ -40,18 +40,39 @@ class HCProblem:
 		
 		return ig.Graph(n=HCProblem.N_NODES, edges=all_edges)
 	
-	@staticmethod
-	def get_node_type(node_idx: int):
-		return sum([node_idx >= x for x in [HCProblem.OFFSET_ROOMS, HCProblem.OFFSET_CABINETS, HCProblem.OFFSET_THINGS, HCProblem.OFFSET_PERSONS]]) - 1
 	
 	@property
-	def globals(self) -> list[int]:
-		ans = np.array([-1] * HCProblem.N_NODES)
-		ans[HCProblem.OFFSET_ROOMS: HCProblem.OFFSET_ROOMS + self.rooms] = 0
-		ans[HCProblem.OFFSET_CABINETS: HCProblem.OFFSET_CABINETS + self.cabinets] = 1
-		ans[HCProblem.OFFSET_THINGS: HCProblem.OFFSET_THINGS + self.things] = 2
-		ans[HCProblem.OFFSET_PERSONS: HCProblem.OFFSET_PERSONS + self.persons] = 3
-		return ans
+	def globals(self) -> dict[str, np.ndarray]:
+		node_types = np.array([-1] * HCProblem.N_NODES)
+		node_types[HCProblem.OFFSET_ROOMS: HCProblem.OFFSET_ROOMS + self.rooms] = 0
+		node_types[HCProblem.OFFSET_CABINETS: HCProblem.OFFSET_CABINETS + self.cabinets] = 1
+		node_types[HCProblem.OFFSET_THINGS: HCProblem.OFFSET_THINGS + self.things] = 2
+		node_types[HCProblem.OFFSET_PERSONS: HCProblem.OFFSET_PERSONS + self.persons] = 3
+
+		igraph = self.igraph
+		senders, receivers = zip(*igraph.get_edgelist())
+		senders = np.array(senders)
+		receivers = np.array(receivers)
+
+		sender_types = node_types[senders]
+		receiver_types = node_types[receivers]
+		n_edges = senders.shape[0]
+		# Assign group ids: -1 for non-mutually-exclusive edges
+		group_ids = -np.ones(n_edges, dtype=np.int32)
+		receivers_int = np.asarray(receivers, dtype=np.int32)
+		senders_int = np.asarray(senders, dtype=np.int32)
+
+		# Cabinet-room: group by cabinet (receiver type 1, sender type 0)
+		mask_cabinet_room = np.asarray((sender_types == 0) & (receiver_types == 1), dtype=bool)
+		group_ids = np.where(mask_cabinet_room, receivers_int, group_ids)
+		# Thing-cabinet: group by thing (sender type 2, receiver type 1)
+		mask_thing_cabinet = np.asarray((sender_types == 1) & (receiver_types == 2), dtype=bool)
+		group_ids = np.where(mask_thing_cabinet, receivers_int, group_ids)
+		# Room-person: group by room (sender type 0, receiver type 3)
+		mask_room_person = np.asarray((sender_types == 0) & (receiver_types == 3), dtype=bool)
+		group_ids = np.where(mask_room_person, senders_int, group_ids)
+
+		return {"node_types": node_types, "group_ids": group_ids}
 
 
 ##
@@ -60,18 +81,119 @@ class HCProblem:
 # CxT thing <-> cabinet
 # PxR room <-> person
 
-DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]), HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
-			   HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
+#DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]), HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
+#			   HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
+
+DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)])]
 
 VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
 
-def plot_graph(igraph, globals):
+def plot_graph(igraph, globals, n):
 	omit_nodes = (globals == -1).cumsum()
 	globals_compact = globals[np.where(globals > -1)]
 	edges = igraph.get_edgelist()
 	edges = [(a - omit_nodes[a], b - omit_nodes[b]) for a, b in edges]
 	plot_graph = ig.Graph(edges=edges)
-	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for t in globals_compact], target="plot.png")
+
+	things = [i for i in range(len(globals_compact)) if globals_compact[i] == 2]
+	rooms = [i for i in range(len(globals_compact)) if globals_compact[i] == 0]
+	cabinets = [i for i in range(len(globals_compact)) if globals_compact[i] == 1]
+
+
+	owners_of_things = {}
+
+	for thing in things:
+		connections_to_persons = sum(1 for e in edges if e[0] == thing and globals_compact[e[1]] == 3)
+		connections_to_cabinets = sum(1 for e in edges if e[1] == thing and globals_compact[e[0]] == 1)
+		#print(f"Thing {thing} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
+		owners_of_things[thing] = [e[1] for e in edges if e[0] == thing and globals_compact[e[1]] == 3][0]
+	
+	owners_of_rooms = {}
+
+	for room in rooms:
+		connections_to_persons = sum(1 for e in edges if e[0] == room and globals_compact[e[1]] == 3)
+		connections_to_cabinets = sum(1 for e in edges if e[0] == room and globals_compact[e[1]] == 1)
+		#print(f"Room {room} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
+		owners_of_rooms[room] = [e[1] for e in edges if e[0] == room and globals_compact[e[1]] == 3][0]
+
+	owners_of_cabinets = {}
+
+	for cabinet in cabinets:
+		owners_of_cabinets[cabinet] = [owners_of_rooms[e[0]] for e in edges if e[1] == cabinet and globals_compact[e[0]] == 0][0]
+
+	holders_of_things = {}
+
+	for thing in things:
+		holders_of_things[thing] = [owners_of_cabinets[e[0]] for e in edges if e[1] == thing and globals_compact[e[0]] == 1][0]
+
+	mismatches = sum(1 for k in owners_of_things if owners_of_things[k] != holders_of_things[k])
+
+	print(f"Mismatches: {mismatches}")
+
+	edge_colors = ["red" if globals_compact[e[1]] == 2 and globals_compact[e[0]] == 1 else "black" for e in edges]
+	vertex_colors = ["black" if globals_compact[i] != 2 else ("red" if owners_of_things[i] != holders_of_things[i] else "green") for i in range(len(globals_compact))]
+	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target=f"plot_{n}.png",vertex_color=vertex_colors) # edge_color=edge_colors
+
+	return mismatches
+
+def solve_plot_graph(igraph, globals):
+	omit_nodes = (globals == -1).cumsum()
+	globals_compact = globals[np.where(globals > -1)]
+	edges = igraph.get_edgelist()
+	edges = [(a - omit_nodes[a], b - omit_nodes[b]) for a, b in edges]
+
+	edges = [e for e in edges if globals_compact[e[0]] == 2 and globals_compact[e[1]] == 3]
+
+	things = [i for i in range(len(globals_compact)) if globals_compact[i] == 2]
+	cabinets = [i for i in range(len(globals_compact)) if globals_compact[i] == 1]
+	persons = [i for i in range(len(globals_compact)) if globals_compact[i] == 3]
+	rooms = [i for i in range(len(globals_compact)) if globals_compact[i] == 0]
+	
+	ci = 0
+	for thing in things:
+		edges.append((thing, cabinets[ci // 5]))
+		ci += 1
+	ri = 0
+	for c in cabinets:
+		edges.append((c, rooms[ri // 2]))
+		ri += 1
+
+	for r, p in zip(rooms, persons):
+		edges.append((r, p))
+
+	plot_graph = ig.Graph(edges=edges)
+
+	#things = [i for i in range(len(globals_compact)) if globals_compact[i] == 2]
+
+	#for thing in things:
+	#	connections_to_persons = sum(1 for e in edges if e[0] == thing and globals_compact[e[1]] == 3)
+	#	connections_to_cabinets = sum(1 for e in edges if e[1] == thing and globals_compact[e[0]] == 1)
+	#	print(f"Thing {thing} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
+	edge_colors = ["red" if globals_compact[e[1]] == 2 and globals_compact[e[0]] == 1 else "black" for e in edges]
+	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target="plot.png",) # edge_color=edge_colors
+
+def group_ids_from_graph(jraph_graph_list):
+    graph = jraph_graph_list["graphs"][0]
+    senders = graph.senders.astype(np.int32)
+    receivers = graph.receivers.astype(np.int32)
+    globals_ = graph.globals.astype(np.int32)
+    sender_types = globals_[senders]
+    receiver_types = globals_[receivers]
+    n_edges = senders.shape[0]
+    # Assign group ids: -1 for non-mutually-exclusive edges
+    group_ids = -np.ones(n_edges, dtype=np.int32)
+    receivers_int = np.asarray(receivers, dtype=np.int32)
+
+    # Cabinet-room: group by cabinet (receiver type 1, sender type 0)
+    mask_cabinet_room = np.asarray((sender_types == 0) & (receiver_types == 1), dtype=bool)
+    group_ids = np.where(mask_cabinet_room, receivers_int, group_ids)
+    # Thing-cabinet: group by thing (sender type 2, receiver type 1)
+    mask_thing_cabinet = np.asarray((sender_types == 1) & (receiver_types == 2), dtype=bool)
+    group_ids = np.where(mask_thing_cabinet, receivers_int, group_ids)
+    # Room-person: group by room (sender type 0, receiver type 3)
+    mask_room_person = np.asarray((sender_types == 0) & (receiver_types == 3), dtype=bool)
+    group_ids = np.where(mask_room_person, receivers_int, group_ids)
+    return group_ids
 
 class HCPDatasetGenerator(BaseDatasetGenerator):
 	"""
@@ -103,15 +225,17 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			"upperBoundEnergies": [],
 			"compl_H_graphs": [],
 		}
-
+		edges, nodes = 0, 0
 		for idx, problem in enumerate(DUMMY_SAMPLES):
 			g = problem.igraph
-
+			edges += g.ecount()
+			nodes += g.vcount()
 			globals = problem.globals
 
-			plot_graph(g, globals)
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g, double_edges=False, globals=globals)
+
+			# solve_plot_graph(g, globals["node_types"])
 
 			#Energy, boundEnergy, solution, runtime, H_graph_compl = self.solve_graph(H_graph, g)
 
@@ -133,7 +257,8 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 					indexed_solution_dict[key] = solutions[key][idx]
 			self.save_instance_solution(indexed_solution_dict, idx)
 		self.save_solutions(solutions)
-
+		print("total edges", edges)
+		print("total nodes", nodes)
 
 
 

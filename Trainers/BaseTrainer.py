@@ -11,6 +11,8 @@ import scipy.special
 import wandb
 from tqdm import tqdm
 import time
+import igraph as ig
+from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot_graph
 
 class Base(ABC):
     def __init__(self, config, EnergyClass, NoiseClass, model):
@@ -62,7 +64,7 @@ class Base(ABC):
         self.vmapped_energy_feasible = jax.vmap(self.energy_feasible, in_axes=(None, 1), out_axes=(1, 0, 1))
 
         self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-        self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None),
+        self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, None),
                                                         out_axes=(1))
 
         self.pmap_apply_CE_on_p = jax.pmap(self.apply_CE_on_p, in_axes=(0, 0))
@@ -152,10 +154,19 @@ class Base(ABC):
         return params, opt_state, loss, (log_dict, energy_graph_batch, key)
 
 
+    def show_graph(self, graph_batch, log_dict, select_sample = 0):
+        sample = log_dict["X_0"][0,:,select_sample, 0]
+        edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
+        graph = ig.Graph(edges=edges)
+        plot_graph(graph, graph_batch["graphs"][0].globals[0])
+    
+
     def evaluation_step(self, params, graph_batch, energy_graph_batch, T, batched_key, mode="eval", key=None, n_sampling_rounds=None, sampling_temp=None, sampling_mode = "temps", epoch = None, epochs = None):
         start_forw_pass_time = time.time()
         loss, (log_dict, _) = self.pmap_sample(params, graph_batch, energy_graph_batch, T, batched_key)
         end_forw_pass_time = time.time()
+
+        #self.show_graph(graph_batch, log_dict)
 
         log_dict["time"] = {}
         log_dict["time"]["forward_pass"] = end_forw_pass_time - start_forw_pass_time

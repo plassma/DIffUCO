@@ -259,9 +259,32 @@ def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func =
     device_batched_graphs = [jraph.batch_np(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device])
                              for idx in range(n_devices)] ### TODO move this to collate function
 
+    gid_pad = [0] + [jg.globals["group_ids"].max() + 1 for jg in jraph_graph_list]
+    gid_cat = np.concatenate(list(jg.globals["group_ids"] for jg in jraph_graph_list))
+
+    gid_pad = np.array(gid_pad)
+    gid_cat = np.array(gid_cat)
+
+    gid_pad = np.concatenate(list(np.ones_like(jg.globals["group_ids"]) * gid_pad[i] for i, jg in enumerate(jraph_graph_list)))
+    gid_cat[gid_cat > 0] += gid_pad[gid_cat > 0]
+    
+    unique_ids, counts = jnp.unique(gid_cat, return_counts=True)
+
+    def lookup_count(gid):
+        return counts[jnp.argmax(unique_ids == gid)]
+
+    group_counts = np.array([lookup_count(gid) for gid in gid_cat])
+
+    device_batched_graphs[0].globals["group_ids"] = gid_cat
+    device_batched_graphs[0].globals["group_counts"] = group_counts
 
     padded_graph_list, max_pad_nodes_to, max_pad_edges_to = pad_graphs_to_same_size_from_statistics(device_batched_graphs, dataset_statistics_dict, pad_func = pad_func)
     device_batched_graphs = next(device_batch(padded_graph_list))
+
+    device_batched_graphs.globals["node_types"][-1, -1] = -1
+    device_batched_graphs.globals["group_ids"][0, -1] = -1
+    device_batched_graphs.globals["group_ids"][0] = np.unique(device_batched_graphs.globals["group_ids"], return_inverse=True)[1]
+    device_batched_graphs.globals["group_counts"][0][device_batched_graphs.globals["group_ids"][0] == -1] = 1 # plassma: fix logprob at constant edges
     # print("make list", step2-step1)
     # print("pad graphs", step3-step2)
     # print("next generator", step4-step3)

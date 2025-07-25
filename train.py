@@ -27,7 +27,7 @@ from utils import reshape_utils
 from utils import dict_count
 import os
 import igraph as ig
-
+from EnergyFunctions.HCPEnergy import HCPEnergyClass
 import warnings
 
 # def my_formatwarning(message, category, filename, lineno, line=None):
@@ -284,8 +284,8 @@ class TrainMeanField:
 		self.EnergyClass = EnergyClass
 		self.relaxed_energy = EnergyClass.calculate_Energy
 		self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None), out_axes=(1))
-		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None),
+		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None, None), out_axes=(1))
+		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, None),
 														out_axes=(1))
 		self.config["vmapped_energy_loss_func"] = self.vmapped_relaxed_energy_for_Loss
 		self.config["vmapped_energy_func"] = self.vmapped_relaxed_energy
@@ -333,6 +333,8 @@ class TrainMeanField:
 		else:
 			loaded_dict = self._load_last_epoch()
 			loaded_config = loaded_dict["config"]
+			for k in ["N_warmup", "N_anneal", "N_equil"]:
+				loaded_config[k] = config[k]
 			return loaded_config
 
 	def __init_network(self):
@@ -624,7 +626,15 @@ class TrainMeanField:
 
 		self.params, self.opt_state, loss, (log_dict, energy_graph_batch, self.key) = self.TrainerClass.train_step(self.params, self.opt_state, graph_batch,
 																							  energy_graph_batch, self.T, self.key)
-
+		
+		
+		#node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].n_node.shape[1]), graph_batch["graphs"][0].n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].n_node.sum())
+		#manual_energy = []
+		#class_energy = []
+		#for i in range(log_dict["X_0"].shape[-2]):
+		#	manual_energy.append(self.show_graph(graph_batch, log_dict, i))
+		#	class_energy.append(HCPEnergyClass.calculate_Energy(None, graph_batch["graphs"][0], log_dict["X_0"][0,:,i, 0], node_gr_idx)[0])
+		
 		return loss, (log_dict, energy_graph_batch, batching_time)
 
 	def train(self):
@@ -850,10 +860,11 @@ class TrainMeanField:
 
 		wandb.log(eval_log_dict)
 
-	def show_graph(self, graph_batch, log_dict):
-		edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(log_dict["X_0"][0,:,2,0]) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
+	def show_graph(self, graph_batch, log_dict, select_sample = 0):
+		sample = log_dict["X_0"][0,:,select_sample, 0]
+		edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
 		graph = ig.Graph(edges=edges)
-		plot_graph(graph, graph_batch["graphs"][0].globals[0])
+		return plot_graph(graph, graph_batch["graphs"][0].globals["node_types"][0], select_sample)
 
 	def test(self, mode = "test"):
 
@@ -881,7 +892,6 @@ class TrainMeanField:
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode)
 
 			self.show_graph(graph_batch, log_dict)
-
 			time_dict["forward_pass"].append(log_dict["time"]["forward_pass"])
 			time_dict["CE"].append(log_dict["time"]["CE"])
 

@@ -22,6 +22,7 @@ class BernoulliNoiseDistr(BaseNoiseDistr):
         graph_idx = jnp.arange(n_graph)
         total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
         node_gr_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
+        edge_gr_idx = node_gr_idx[jraph_graph.senders]
         log_p_per_node = self.get_log_p_T_0_per_node(X_prev, X_next, t_idx)
 
         n_graph = jraph_graph.n_node.shape[0]
