@@ -41,6 +41,7 @@ class BernoulliNoiseDistr(BaseNoiseDistr):
         log_p_per_node = noise_per_node
 
         return log_p_per_node
+    
     @partial(jax.jit, static_argnums=(0))
     def sample_forward_diff_process(self, X_t_m1, t_idx, key):
         gamma_t = self.get_gamma_t(t_idx)
@@ -57,7 +58,7 @@ class BernoulliNoiseDistr(BaseNoiseDistr):
                                         shape=log_p_per_node.shape[:-1])
 
         one_hot_state = jax.nn.one_hot(X_next, num_classes=2)
-        spin_log_probs = jnp.sum(log_p_per_node * one_hot_state, axis=-1)
+        spin_log_probs = jnp.sum(log_p_per_node * X_next, axis=-1)
 
         return X_next, spin_log_probs, key
 

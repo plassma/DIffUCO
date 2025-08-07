@@ -36,23 +36,14 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
         gamma_t = self.get_gamma_t(t_idx)
         n_graph = jraph_graph.n_node.shape[0]
         graph_idx = jnp.arange(n_graph)
+        
+        nodes = jraph_graph.nodes
+        n_node = jraph_graph.n_node
 
-        if self.mode == "edge" and False: #todo plassma: provide only node_gr indices for now
-            edges = jraph_graph.edges
-            n_edge = jraph_graph.n_edge
-            
-            total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
-            edge_gr_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
+        total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
+        node_gr_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
 
-            Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, edge_gr_idx)
-        else:
-            nodes = jraph_graph.nodes
-            n_node = jraph_graph.n_node
-
-            total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-            node_gr_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
-
-            Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, node_gr_idx, key) # Energy called here with (11551, 20, 1)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, node_gr_idx, key) # Energy called here with (11551, 20, 1)
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         log_p = (-1)*gamma_t/T*Noise_Energy_per_graph
         return log_p

@@ -141,6 +141,9 @@ class DiffModel(nn.Module):
         X_prev = self._add_random_nodes_and_time_index(
             X_prev, rand_node_features, t_idx_per_node
         )  # todo plassma: useful edge features?!
+        key, subkey = jax.random.split(key)
+        node_embeddings = jnp.concatenate([node_embeddings, jax.random.uniform(subkey, shape=node_embeddings.shape)], axis=-1)
+
         embeddings = self.encode_process_decode(
             jraph_graph_list, X_prev, node_embeddings
         )  # (11551, 1, 64) | (3151, 1, 64)
@@ -321,7 +324,7 @@ class DiffModel(nn.Module):
         one_hot_state = jax.nn.one_hot(X_next[..., 0], num_classes=self.n_bernoulli_features)
 
         # X_next = jnp.expand_dims(X_next, axis = -1)
-        spin_log_probs = jnp.sum(spin_logits * one_hot_state, axis=-1)
+        spin_log_probs = jnp.sum(spin_logits * X_next, axis=-1)
 
         # print("Diff model model samples", X_next.shape, one_hot_state.shape)
         return X_next[..., 0], spin_log_probs, key  # [N, 1], [N, 1]
@@ -339,7 +342,7 @@ class DiffModel(nn.Module):
 
         one_hot_state = jax.nn.one_hot(X_next, num_classes=self.n_bernoulli_features)
         # X_next = jnp.expand_dims(X_next, axis = -1)
-        spin_log_probs = jnp.sum(spin_logits * one_hot_state, axis=-1)
+        spin_log_probs = jnp.sum(spin_logits * X_next, axis=-1)
         # print(X_next.shape, X_next, jnp.exp(spin_log_probs))
         X_next_log_prob = self.__get_log_prob(
             spin_log_probs[..., 0], node_graph_idx, n_graph

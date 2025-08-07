@@ -36,7 +36,7 @@ class Reinforce(Base):
             entropy_term_2 = -probs_down * log_probs_down
             entropy_term_per_node = entropy_term_1 + entropy_term_2 # normal entropy_term_per_node: [N, 20, 1]
         else:
-            entropy_term_per_node = (spin_logits * jnp.exp(spin_logits))
+            entropy_term_per_node = spin_logits * jnp.exp(spin_logits) # todo plassma: is entropy term wrong?
 
         n_graph = jraph_graph.n_node.shape[0]
         # working shapes MIS: [3151, 20, 1], [3151], 31
