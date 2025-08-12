@@ -4,6 +4,8 @@ import numpy as np
 import jax
 import time
 
+from sympy import group
+
 
 def pad_with_graphs(graph: jraph.GraphsTuple,
                     n_node: int,

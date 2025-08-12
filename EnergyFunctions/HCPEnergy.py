@@ -39,6 +39,8 @@ class HCPEnergyClass(BaseEnergyClass):
         n_node = max(H_graph.nodes.shape)
         node_types = H_graph.globals["node_types"].squeeze() # faulty shape: (1, N)
 
+        # sample = H_graph.globals["solution"]
+
         senders = H_graph.senders.squeeze()
         receivers = H_graph.receivers.squeeze()
 

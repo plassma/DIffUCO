@@ -126,11 +126,14 @@ class DiffModel(nn.Module):
             num_embeddings=5, features=self.n_random_node_features // 2
         )
 
+        self.edge_embedder = nn.Embed(num_embeddings=626, features=self.n_random_node_features)
+
     @flax.linen.jit
     def __call__(
         self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key
     ):
         node_embeddings = self.node_embedder(jraph_graph_list["graphs"][0].globals["node_types"])
+        # rand_node_features = self.edge_embedder(jnp.arange(X_prev.shape[0])) # todo: remove this line again
         rand_node_features += jnp.concatenate(
             (
                 node_embeddings[jraph_graph_list["graphs"][0].senders],
@@ -138,6 +141,9 @@ class DiffModel(nn.Module):
             ),
             axis=-1,
         )
+        # todo plassma: use random node features again
+        #node_embeddings = self.edge_embedder(jnp.arange(X_prev.shape[0]))
+
         X_prev = self._add_random_nodes_and_time_index(
             X_prev, rand_node_features, t_idx_per_node
         )  # todo plassma: useful edge features?!
@@ -147,6 +153,8 @@ class DiffModel(nn.Module):
         embeddings = self.encode_process_decode(
             jraph_graph_list, X_prev, node_embeddings
         )  # (11551, 1, 64) | (3151, 1, 64)
+
+        #embeddings = jnp.pad(X_prev, ((0,0),(0, 45))) #debug: replace GNN with its input
 
         bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis=-2)
         embeddings = bernoulli_embeddings

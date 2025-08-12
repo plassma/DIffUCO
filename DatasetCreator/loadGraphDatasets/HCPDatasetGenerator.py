@@ -172,6 +172,30 @@ def solve_plot_graph(igraph, globals):
 	edge_colors = ["red" if globals_compact[e[1]] == 2 and globals_compact[e[0]] == 1 else "black" for e in edges]
 	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target="plot.png",) # edge_color=edge_colors
 
+def solve_graph(igraph, globals):
+	edges = igraph.get_edgelist()
+
+	edges = [e for e in edges if globals[e[0]] == 2 and globals[e[1]] == 3]
+
+	things = [i for i in range(len(globals)) if globals[i] == 2]
+	cabinets = [i for i in range(len(globals)) if globals[i] == 1]
+	persons = [i for i in range(len(globals)) if globals[i] == 3]
+	rooms = [i for i in range(len(globals)) if globals[i] == 0]
+
+	ci = 0
+	for thing in things:
+		edges.append((cabinets[ci // 5], thing))
+		ci += 1
+	ri = 0
+	for c in cabinets:
+		edges.append((rooms[ri // 2], c))
+		ri += 1
+
+	for r, p in zip(rooms, persons):
+		edges.append((r, p))
+
+	return edges
+
 def group_ids_from_graph(jraph_graph_list):
     graph = jraph_graph_list["graphs"][0]
     senders = graph.senders.astype(np.int32)
@@ -232,10 +256,12 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			nodes += g.vcount()
 			globals = problem.globals
 
+			edges = solve_graph(g, globals["node_types"])
+			globals["solution"] = np.array([1 if e in set(edges) else 0 for e in g.get_edgelist()])
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g, double_edges=False, globals=globals)
 
-			# solve_plot_graph(g, globals["node_types"])
+			
 
 			#Energy, boundEnergy, solution, runtime, H_graph_compl = self.solve_graph(H_graph, g)
 
@@ -257,8 +283,7 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 					indexed_solution_dict[key] = solutions[key][idx]
 			self.save_instance_solution(indexed_solution_dict, idx)
 		self.save_solutions(solutions)
-		print("total edges", edges)
-		print("total nodes", nodes)
+
 
 
 
