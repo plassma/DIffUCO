@@ -134,9 +134,9 @@ def meanfield_run():
         #jax.config.update("jax_debug_infs", True)
         #jax.config.update('jax_platform_name', 'cpu')
         if args.EnergyFunction == "MIS":
-            run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node"}, overwrite = True)
+            run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": 2000, "load_wandb_id": None,"n_random_node_features": 16}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": 2000, "load_wandb_id": None,"n_random_node_features": 16, "n_diffusion_steps": 3}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:

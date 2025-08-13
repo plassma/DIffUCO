@@ -37,7 +37,7 @@ class Reinforce(Base):
             entropy_term_per_node = entropy_term_1 + entropy_term_2 # normal entropy_term_per_node: [N, 20, 1]
         else:
             entropy_term_per_group = -jax.ops.segment_sum(spin_logits * jnp.exp(spin_logits), jraph_graph.globals["group_ids"], num_segments=66)
-            entropy_term_per_node = entropy_term_per_group[jraph_graph.globals["group_ids"]]
+            entropy_term_per_node = entropy_term_per_group[jraph_graph.globals["group_ids"]] / jraph_graph.globals["group_counts"]
 
         n_graph = jraph_graph.n_node.shape[0]
         # working shapes MIS: [3151, 20, 1], [3151], 31
