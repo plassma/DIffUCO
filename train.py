@@ -143,7 +143,7 @@ class TrainMeanField:
 		elif(self.problem_name == "IsingModel"):
 			self.config["n_features_list_prob"] = [64,64,self.n_bernoulli_features]
 		else:		
-			self.config["n_features_list_prob"] = [120,64,2]
+			self.config["n_features_list_prob"] = [120,64,1]
 
 		self.n_features_list_prob = self.config["n_features_list_prob"]
 		self.config["n_bernoulli_features"] = self.n_bernoulli_features

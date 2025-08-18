@@ -126,38 +126,38 @@ class DiffModel(nn.Module):
             num_embeddings=5, features=self.n_random_node_features // 2
         )
 
-        self.edge_embedder = nn.Embed(num_embeddings=626, features=self.n_random_node_features)
+        self.edge_embedder = nn.Embed(num_embeddings=626, features=64)
 
     @flax.linen.jit
     def __call__(
         self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key
     ):
-        node_embeddings = self.node_embedder(jraph_graph_list["graphs"][0].globals["node_types"])
-        # rand_node_features = self.edge_embedder(jnp.arange(X_prev.shape[0])) # todo: remove this line again
-        rand_node_features += jnp.concatenate(
-            (
-                node_embeddings[jraph_graph_list["graphs"][0].senders],
-                node_embeddings[jraph_graph_list["graphs"][0].receivers],
-            ),
-            axis=-1,
-        )
+        #node_embeddings = self.node_embedder(jraph_graph_list["graphs"][0].globals["node_types"])
+        #rand_node_features += jnp.concatenate(
+        #    (
+        #        node_embeddings[jraph_graph_list["graphs"][0].senders],
+        #        node_embeddings[jraph_graph_list["graphs"][0].receivers],
+        #    ),
+        #    axis=-1,
+        #)
         # todo plassma: use random node features again
         #node_embeddings = self.edge_embedder(jnp.arange(X_prev.shape[0]))
 
-        X_prev = self._add_random_nodes_and_time_index(
-            X_prev, rand_node_features, t_idx_per_node
-        )  # todo plassma: useful edge features?!
-        key, subkey = jax.random.split(key)
-        node_embeddings = jnp.concatenate([node_embeddings, jax.random.uniform(subkey, shape=node_embeddings.shape)], axis=-1)
+        #X_prev = self._add_random_nodes_and_time_index(
+        #    X_prev, rand_node_features, t_idx_per_node
+        #)  # todo plassma: useful edge features?!
+        #key, subkey = jax.random.split(key)
+        #node_embeddings = jnp.concatenate([node_embeddings, jax.random.uniform(subkey, shape=node_embeddings.shape)], axis=-1)
 
-        embeddings = self.encode_process_decode(
-            jraph_graph_list, X_prev, node_embeddings
-        )  # (11551, 1, 64) | (3151, 1, 64)
+        #embeddings = self.encode_process_decode(
+        #    jraph_graph_list, X_prev, node_embeddings
+        #)  # (11551, 1, 64) | (3151, 1, 64)
 
+        embeddings = self.edge_embedder(jnp.arange(X_prev.shape[0]))[:, None, :]
         #embeddings = jnp.pad(X_prev, ((0,0),(0, 45))) #debug: replace GNN with its input
 
-        bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis=-2)
-        embeddings = bernoulli_embeddings
+        #bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis=-2)
+        #embeddings = bernoulli_embeddings
 
         out_dict = {}
         # out_dict = self.HeadModel(jraph_graph_list, rand_node_features, out_dict) # original embeddings shape: [626,1,64]
@@ -242,6 +242,7 @@ class DiffModel(nn.Module):
                 )[:-1]
             )
         )
+        out_dict["pred_entropy"] = - spin_logits * jnp.exp(spin_logits)
         out_dict["X_next"] = X_next  # [3151, 1]
         out_dict["spin_log_probs"] = spin_log_probs  # [3151, 1]
         out_dict["state_log_probs"] = self.__get_log_prob(
@@ -254,6 +255,7 @@ class DiffModel(nn.Module):
     def unbiased_last_step(
         self, params, jraph_graph_list, X_prev, t_idx, key, eps=0.01
     ):
+        assert False
         rand_nodes, key = self.reinit_rand_nodes(X_prev, key)
         out_dict, key = self.apply(
             params, jraph_graph_list, rand_nodes, X_prev, t_idx, key

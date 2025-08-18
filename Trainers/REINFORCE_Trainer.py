@@ -37,7 +37,7 @@ class Reinforce(Base):
             entropy_term_per_node = entropy_term_1 + entropy_term_2 # normal entropy_term_per_node: [N, 20, 1]
         else:
             entropy_term_per_group = -jax.ops.segment_sum(spin_logits * jnp.exp(spin_logits), jraph_graph.globals["group_ids"], num_segments=66)
-            entropy_term_per_node = entropy_term_per_group[jraph_graph.globals["group_ids"]] / jraph_graph.globals["group_counts"]
+            entropy_term_per_node = entropy_term_per_group[jraph_graph.globals["group_ids"]] / jraph_graph.globals["group_counts"][..., None, None]
 
         n_graph = jraph_graph.n_node.shape[0]
         # working shapes MIS: [3151, 20, 1], [3151], 31
@@ -244,7 +244,7 @@ class Reinforce(Base):
                                "L_entropy_REINFORCE": L_entropy_Reinforce, "L_entropy_repara": L_entropy_repara,
                                "L_noise_repara": L_noise_repara, "L_energy_repara": L_energy_repara,
                                "overall_Loss": Loss, "log_p_0_T": mean_log_p_0_T, "log_p_1_T": mean_log_p_1_T
-                               ,"p_0_T": mean_p_0_T, "p_1_T": mean_p_1_T},
+                               ,"p_0_T": mean_p_0_T, "p_1_T": mean_p_1_T, "pred_entropy": out_dict["pred_entropy"].mean()},
                     "metrics": {"energies": energies, "entropies": 0., "spin_log_probs": spin_log_probs,
                                 "free_energies": L_entropy, "graph_mean_energies": graph_mean_energy},
                     "energies": Energy_dict,
@@ -288,6 +288,7 @@ class Reinforce(Base):
                                                  batched_key)
 
         X_next = out_dict["X_next"]
+        pred_entropy = out_dict["pred_entropy"]
         spin_log_probs = out_dict["spin_log_probs"]
         spin_logits_next = out_dict["spin_logits"]
         graph_log_prob = out_dict["graph_log_prob"]
@@ -302,6 +303,7 @@ class Reinforce(Base):
         scan_dict["L_entropy"] += Entropy_Loss
         scan_dict["L_entropy_repara"] += Loss_entropy_repara
         scan_dict["L_entropy_Reinforce"] += Loss_entropy_Reinforce
+        # scan_dict["pred_entropy"] += pred_entropy
 
         key, subkey = jax.random.split(key)
         scan_dict["key"] = key
@@ -330,6 +332,7 @@ class Reinforce(Base):
         out_dict = {}
         out_dict["spin_log_probs"] = spin_log_probs
         out_dict["spin_logits_next"] = spin_logits_next
+        out_dict["pred_entropy"] = pred_entropy
         return scan_dict, out_dict
 
     @partial(jax.jit, static_argnums=(0, 6))
@@ -380,6 +383,7 @@ class Reinforce(Base):
                     "L_entropy_Reinforce": L_entropy_Reinforce,
                     "L_energy_repara": L_energy_repara,
                     "L_noise_repara": L_noise_repara,
+                    "pred_entropy": 0.,
                     "L_entropy_repara": L_entropy_repara, "log_p_0_T": log_p_0_T, "spin_logits_prev": spin_logits_prev,
                     "Xs_over_different_steps": Xs_over_different_steps, "Noise_loss_over_diff_steps": Noise_loss_over_diff_steps,
                      "prob_over_diff_steps": prob_over_diff_steps, "log_p_prev_per_node": log_p_prev_per_node,
@@ -423,7 +427,7 @@ class Reinforce(Base):
                                "L_entropy_REINFORCE": L_entropy_Reinforce, "L_entropy_repara": L_entropy_repara,
                                "L_noise_repara": L_noise_repara, "L_energy_repara": L_energy_repara,
                                "overall_Loss": Loss, "log_p_0_T": mean_log_p_0_T, "log_p_1_T": mean_log_p_1_T
-                               ,"p_0_T": mean_p_0_T, "p_1_T": mean_p_1_T},
+                               ,"p_0_T": mean_p_0_T, "p_1_T": mean_p_1_T, "pred_entropy": out_dict_list["pred_entropy"].mean()},
                     "metrics": {"energies": energies, "entropies": 0., "spin_log_probs": spin_log_probs,
                                 "free_energies": L_entropy, "graph_mean_energies": graph_mean_energy},
                     "energies": Energy_dict,

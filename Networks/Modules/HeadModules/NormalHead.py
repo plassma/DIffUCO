@@ -11,12 +11,14 @@ from typing import Any
 def grouped_log_softmax(logits: jnp.ndarray, jraph_graph_list: dict, n_groups: int = 66) -> jnp.ndarray: # todo plassma: n_groups is hardcoded for now
     group_ids = jraph_graph_list["graphs"][0].globals["group_ids"]
     # num_segments = jraph_graph_list["n_groups"][0]#jnp.max(group_ids) + 1
-    max_per_group = jax.ops.segment_max(logits[:, :, 1].squeeze(-1), group_ids, n_groups)
-    shifted = logits[:, :, 1].squeeze(-1) - max_per_group[group_ids]
+    max_per_group = jax.ops.segment_max(logits[:, :, 0].squeeze(-1), group_ids, n_groups)
+    shifted = logits[:, :, 0].squeeze(-1) - max_per_group[group_ids]
     exp_shifted = jnp.exp(shifted)
     sum_exp_per_group = jax.ops.segment_sum(exp_shifted, group_ids, n_groups)
     logsumexp_per_group = jnp.log(sum_exp_per_group)
-    return (shifted - logsumexp_per_group[group_ids])[..., None]
+    log_probs = (shifted - logsumexp_per_group[group_ids])[..., None]
+    log_probs = jnp.where(jraph_graph_list["graphs"][0].globals["group_ids"] == 0, 0, log_probs[..., 0])[..., None]
+    return log_probs
 
 def group_ids_from_graph(jraph_graph_list):
     graph = jraph_graph_list["graphs"][0]
