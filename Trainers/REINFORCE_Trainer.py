@@ -139,7 +139,7 @@ class Reinforce(Base):
                                                                             key)
 
         spin_logits_prev = log_p_uniform
-        spin_log_probs_prev = jnp.sum(spin_logits_prev * X_prev, axis=-1)
+        spin_log_probs_prev = spin_logits_prev * X_prev
 
         L_entropy = 0.
         L_noise = 0.
@@ -162,7 +162,7 @@ class Reinforce(Base):
         log_p_0_T = jnp.zeros((overall_diffusion_steps + 1, n_graphs -1, X_prev.shape[1]))
 
         prob_over_diff_steps = prob_over_diff_steps.at[0].set(0.5)
-        log_p_prev_per_node = log_p_prev_per_node.at[0].set(spin_log_probs_prev[..., None])
+        log_p_prev_per_node = log_p_prev_per_node.at[0].set(spin_log_probs_prev)
         Xs_over_different_steps = Xs_over_different_steps.at[0].set(X_prev)
 
         node_gr_idx, n_graph, total_num_nodes = self._compute_aggr_utils(energy_graph_batch)
@@ -348,7 +348,7 @@ class Reinforce(Base):
                                                                             key)
 
         spin_logits_prev = log_p_uniform
-        spin_log_probs_prev = jnp.sum(spin_logits_prev * X_prev, axis=-1)
+        spin_log_probs_prev = spin_logits_prev * X_prev
 
         L_entropy = 0.
         L_noise = 0.
@@ -371,7 +371,7 @@ class Reinforce(Base):
         log_p_0_T = jnp.zeros((overall_diffusion_steps + 1, n_graphs - 1, X_prev.shape[1]))
 
         prob_over_diff_steps = prob_over_diff_steps.at[0].set(0.5)
-        log_p_prev_per_node = log_p_prev_per_node.at[0].set(spin_log_probs_prev[..., None])
+        log_p_prev_per_node = log_p_prev_per_node.at[0].set(spin_log_probs_prev)
         Xs_over_different_steps = Xs_over_different_steps.at[0].set(X_prev)
 
         node_gr_idx, n_graph, total_num_nodes = self._compute_aggr_utils(energy_graph_batch)

@@ -75,5 +75,5 @@ class HCPEnergyClass(BaseEnergyClass):
         if logits.dtype == jnp.float32:
             logits = groupwise_sample(key, logits, H_graph.globals["group_ids"]).astype(jnp.bool_)[:, 0, 0]
         else:
-            logits = logits[...,1]
+            logits = logits[...,0]
         return self.calculate_Energy(H_graph, logits, node_gr_idx, key=key)
