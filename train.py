@@ -284,8 +284,8 @@ class TrainMeanField:
 		self.EnergyClass = EnergyClass
 		self.relaxed_energy = EnergyClass.calculate_Energy
 		self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None, None), out_axes=(1))
-		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, None),
+		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None, 0), out_axes=(1))
+		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, 0),
 														out_axes=(1))
 		self.config["vmapped_energy_loss_func"] = self.vmapped_relaxed_energy_for_Loss
 		self.config["vmapped_energy_func"] = self.vmapped_relaxed_energy

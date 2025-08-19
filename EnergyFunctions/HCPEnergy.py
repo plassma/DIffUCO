@@ -24,7 +24,7 @@ class HCPEnergyClass(BaseEnergyClass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def calculate_Energy(self, H_graph, sample, node_gr_idx, A = 1., B = 1.2, key=None):
+    def calculate_Energy(self, H_graph, sample, node_gr_idx, A = 1., B = 1.2):
         '''
         This method assumes that no edge dublicates are contained in the graph
         :param H_graph:
@@ -63,7 +63,7 @@ class HCPEnergyClass(BaseEnergyClass):
 
         energy = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None] + 0.0001
 
-        return energy, {}, jnp.zeros_like(energy)
+        return energy, {"dict_energy": energy}, energy
 
     def calculate_relaxed_Energy(self, H_graph, bins, node_gr_idx, A = 1., B = 1.2):
         self.calculate_Energy(H_graph, bins, node_gr_idx, A = A, B = B)
@@ -76,4 +76,4 @@ class HCPEnergyClass(BaseEnergyClass):
             logits = groupwise_sample(key, logits, H_graph.globals["group_ids"]).astype(jnp.bool_)[:, 0, 0]
         else:
             logits = logits[...,0]
-        return self.calculate_Energy(H_graph, logits, node_gr_idx, key=key)
+        return self.calculate_Energy(H_graph, logits, node_gr_idx)

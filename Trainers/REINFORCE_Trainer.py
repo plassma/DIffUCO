@@ -73,10 +73,10 @@ class Reinforce(Base):
     def __get_energy_loss(self, jraph_graph, spin_logits, sum_log_p_prev_per_node, node_gr_idx, key=None):
 
         n_graph = jraph_graph.n_node.shape[0]
-
+        batched_key = jax.random.split(key, num=spin_logits.shape[1])
         relaxed_energies_per_graph, Energy_dict, HB_per_graph = self.vmapped_relaxed_energy_for_Loss(jraph_graph,
                                                                                                       spin_logits,
-                                                                                                      node_gr_idx, key)
+                                                                                                      node_gr_idx, batched_key)
 
         #HA = jnp.mean(HA_per_graph) # todo plassma: removed [:-1]
         #HB = jnp.mean(HB_per_graph) # todo plassma: removed [:-1]
@@ -87,8 +87,9 @@ class Reinforce(Base):
 
         edge_gr_idx = node_gr_idx[jraph_graph.senders]
 
-        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, edge_gr_idx, n_graph), axis=-1,
+        log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, edge_gr_idx, n_graph), axis=-1, # todo plassma: check if this is correct
                                  keepdims=True)
+        Energy_dict = {"dict_energy": Energy_dict["dict_energy"][:-1], "log_state_prob": log_state_prob[:-1]}
         # print("here energy", relaxed_energies_per_graph_no_grad.shape, baseline_per_graph.shape, log_state_prob.shape)
         L_REINFORCE_per_graph = (relaxed_energies_per_graph_no_grad - baseline_per_graph) * log_state_prob
 
