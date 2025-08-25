@@ -34,11 +34,11 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
         
         
         gamma_t = self.get_gamma_t(t_idx)
-        n_graph = jraph_graph.n_node.shape[0]
+        n_graph = jraph_graph["graphs"][0].graph.n_node.shape[0]
         graph_idx = jnp.arange(n_graph)
         
-        nodes = jraph_graph.nodes
-        n_node = jraph_graph.n_node
+        nodes = jraph_graph["graphs"][0].graph.nodes
+        n_node = jraph_graph["graphs"][0].graph.n_node
 
         total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
         node_gr_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)

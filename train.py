@@ -477,13 +477,13 @@ class TrainMeanField:
 			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0])]}
 
 			if self.mode_node_edge == "edge":
-				rand_node_features = jnp.ones((batched_graph.edges.shape[1], self.n_random_node_features))
-				X_prev = jnp.ones((batched_graph.edges.shape[1], 1))
-				t_idx_per_node = jnp.ones((batched_graph.edges.shape[1],1))
+				rand_node_features = jnp.ones((batched_graph.graph.edges.shape[1], self.n_random_node_features))
+				X_prev = jnp.ones((batched_graph.graph.edges.shape[1], 1))
+				t_idx_per_node = jnp.ones((batched_graph.graph.edges.shape[1],1))
 			else:
-				rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
-				X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
-				t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
+				rand_node_features = jnp.ones((batched_graph.graph.nodes.shape[1], self.n_random_node_features))
+				X_prev = jnp.ones((batched_graph.graph.nodes.shape[1], 1))
+				t_idx_per_node = jnp.ones((batched_graph.graph.nodes.shape[1],1))
 				
 			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
 
@@ -617,7 +617,7 @@ class TrainMeanField:
 			wandb.log({"MCMC/Energy": np.mean(self.MCMCSamplerClass.MCMC_Energ_list)})
 			self.MCMCSamplerClass._reset_MCMC_Energy_list()
 
-	def train_step(self, batch_dict):
+	def train_step(self, batch_dict, plot=False):
 		### TODO add code that switches of the buffer
 		step1 = time.time()
 		graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "train")
@@ -627,14 +627,15 @@ class TrainMeanField:
 		self.params, self.opt_state, loss, (log_dict, energy_graph_batch, self.key) = self.TrainerClass.train_step(self.params, self.opt_state, graph_batch,
 																							  energy_graph_batch, self.T, self.key)
 		
-		
-		#node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].n_node.shape[1]), graph_batch["graphs"][0].n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].n_node.sum())
-		#manual_energy = []
-		#class_energy = []
-		#for i in range(log_dict["X_0"].shape[-2]):
-		#	manual_energy.append(self.show_graph(graph_batch, log_dict, i))
-		#	class_energy.append(HCPEnergyClass.calculate_Energy(None, graph_batch["graphs"][0], log_dict["X_0"][0,:,i, 0], node_gr_idx)[0])
-		
+		if plot:
+			node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].graph.n_node.shape[1]), graph_batch["graphs"][0].graph.n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].graph.n_node.sum())
+			manual_energy = []
+			class_energy = []
+			for i in range(log_dict["X_0"].shape[-2]):
+				print("plotting graph", i)
+				manual_energy.append(self.show_graph(graph_batch, log_dict, i))
+				class_energy.append(HCPEnergyClass.calculate_Energy(None, graph_batch["graphs"][0].graph, log_dict["X_0"][0,:,i, 0], node_gr_idx)[0])
+			
 		return loss, (log_dict, energy_graph_batch, batching_time)
 
 	def train(self):
@@ -862,9 +863,9 @@ class TrainMeanField:
 
 	def show_graph(self, graph_batch, log_dict, select_sample = 0):
 		sample = log_dict["X_0"][0,:,select_sample, 0]
-		edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
+		edges = [(graph_batch["graphs"][0].graph.senders[0,i], graph_batch["graphs"][0].graph.receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].graph.senders[0,i] != graph_batch["graphs"][0].graph.receivers[0,i]]
 		graph = ig.Graph(edges=edges)
-		return plot_graph(graph, graph_batch["graphs"][0].globals["node_types"][0], select_sample)
+		return plot_graph(graph, graph_batch["graphs"][0].graph.globals["node_types"][0], select_sample)
 
 	def test(self, mode = "test"):
 

@@ -72,7 +72,7 @@ class Reinforce(Base):
     @partial(jax.jit, static_argnums=(0,))
     def __get_energy_loss(self, jraph_graph, spin_logits, sum_log_p_prev_per_node, node_gr_idx, key=None):
 
-        n_graph = jraph_graph.n_node.shape[0]
+        n_graph = jraph_graph["graphs"][0].graph.n_node.shape[0]
         batched_key = jax.random.split(key, num=spin_logits.shape[1])
         relaxed_energies_per_graph, Energy_dict, HB_per_graph = self.vmapped_relaxed_energy_for_Loss(jraph_graph,
                                                                                                       spin_logits,
@@ -85,11 +85,11 @@ class Reinforce(Base):
         relaxed_energies_per_graph_no_grad = jax.lax.stop_gradient(relaxed_energies_per_graph)
         baseline_per_graph = jax.lax.stop_gradient(jnp.mean(relaxed_energies_per_graph, axis=1, keepdims=True))
 
-        edge_gr_idx = node_gr_idx[jraph_graph.senders]
+        edge_gr_idx = node_gr_idx[jraph_graph["graphs"][0].graph.senders]
 
         log_state_prob = jnp.sum(jax.ops.segment_sum(sum_log_p_prev_per_node, edge_gr_idx, n_graph), axis=-1, # todo plassma: check if this is correct
                                  keepdims=True)
-        Energy_dict = {"dict_energy": Energy_dict["dict_energy"][:-1], "log_state_prob": log_state_prob[:-1]}
+        Energy_dict = {k: v[:-1] for k, v in Energy_dict.items()}
         # print("here energy", relaxed_energies_per_graph_no_grad.shape, baseline_per_graph.shape, log_state_prob.shape)
         L_REINFORCE_per_graph = (relaxed_energies_per_graph_no_grad - baseline_per_graph) * log_state_prob
 
@@ -106,6 +106,8 @@ class Reinforce(Base):
     def __get_Noise_energy_loss(self, jraph_graph, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key=None):
         Noise_Energy_per_graph, sum_log_p_prev_per_node = self.Noise_func(jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key)
         Noise_Energy_per_graph = (-1)*Noise_Energy_per_graph
+        
+        jraph_graph = jraph_graph["graphs"][0].graph
 
         n_graph = jraph_graph.n_node.shape[0]
         L_repara_per_graph = Noise_Energy_per_graph
@@ -136,7 +138,7 @@ class Reinforce(Base):
         else:
             N_basis_states = self.N_test_basis_states
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, one_hot_state, log_p_uniform, key = self.model.sample_prior(energy_graph_batch, N_basis_states,
+        X_prev, one_hot_state, log_p_uniform, key = self.model.sample_prior(graphs["graphs"][0], N_basis_states,
                                                                             key)
 
         spin_logits_prev = log_p_uniform
@@ -190,7 +192,7 @@ class Reinforce(Base):
             graph_log_prob = out_dict["graph_log_prob"]
 
             key, subkey = jax.random.split(key)
-            log_p_t = self.NoiseDistrClass.get_log_p_T_0(energy_graph_batch, X_prev, X_next, model_step_idx, T, subkey)
+            log_p_t = self.NoiseDistrClass.get_log_p_T_0(graphs, X_prev, X_next, model_step_idx, T, subkey)
             log_p_0_T = log_p_0_T.at[i].set(log_p_t[:-1])
 
             Entropy_Loss, Entropy, Loss_entropy_repara, Loss_entropy_Reinforce = self.__get_entropy_loss(
@@ -201,7 +203,7 @@ class Reinforce(Base):
 
             key, subkey = jax.random.split(key)
             Noise_Loss, Noise_Energy, Loss_noise_repara, Loss_noise_Reinforce = self.__get_Noise_energy_loss(
-                energy_graph_batch, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx,
+                graphs, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx,
                 node_gr_idx, T, subkey)
             L_noise += Noise_Loss
             L_noise_repara += Loss_noise_repara
@@ -220,7 +222,7 @@ class Reinforce(Base):
         # Energy_over_diff_steps = Energy_over_diff_steps.at[i].set(self.__get_energy_loss(energy_graph_batch, spin_logits_next, jnp.sum(log_p_prev_per_node, axis = 0), node_gr_idx)[2])
         key, subkey = jax.random.split(key)
         L_energy, energies, Loss_energy_repara, Loss_energy_Reinforce, Energy_dict = self.__get_energy_loss(
-            energy_graph_batch, spin_logits_next, jnp.sum(log_p_prev_per_node[:-1], axis=0), node_gr_idx, subkey)
+            graphs, spin_logits_next, jnp.sum(log_p_prev_per_node[:-1], axis=0), node_gr_idx, subkey)
 
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
 
@@ -296,7 +298,7 @@ class Reinforce(Base):
         key, subkey = jax.random.split(key)
         scan_dict["key"] = key
 
-        log_p_t = self.NoiseDistrClass.get_log_p_T_0(energy_graph_batch, X_prev, X_next, model_step_idx, T, subkey)
+        log_p_t = self.NoiseDistrClass.get_log_p_T_0(graphs, X_prev, X_next, model_step_idx, T, subkey)
         scan_dict["log_p_0_T"] = scan_dict["log_p_0_T"].at[i].set(log_p_t[:-1])
 
         Entropy_Loss, Entropy, Loss_entropy_repara, Loss_entropy_Reinforce = self.__get_entropy_loss(
@@ -309,7 +311,7 @@ class Reinforce(Base):
         key, subkey = jax.random.split(key)
         scan_dict["key"] = key
         Noise_Loss, Noise_Energy, Loss_noise_repara, Loss_noise_Reinforce = self.__get_Noise_energy_loss(
-            energy_graph_batch, X_prev, scan_dict["spin_logits_prev"], spin_logits_next, scan_dict["log_p_prev_per_node"], model_step_idx,
+            graphs, X_prev, scan_dict["spin_logits_prev"], spin_logits_next, scan_dict["log_p_prev_per_node"], model_step_idx,
             node_gr_idx, T, subkey)
         scan_dict["L_noise"] += Noise_Loss
         scan_dict["L_noise_repara"] += Loss_noise_repara
@@ -345,7 +347,7 @@ class Reinforce(Base):
         else:
             N_basis_states = self.N_test_basis_states
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, one_hot_state, log_p_uniform, key = self.model.sample_prior(energy_graph_batch, N_basis_states,
+        X_prev, one_hot_state, log_p_uniform, key = self.model.sample_prior(graphs["graphs"][0], N_basis_states,
                                                                             key)
 
         spin_logits_prev = log_p_uniform
@@ -403,7 +405,7 @@ class Reinforce(Base):
         key, subkey = jax.random.split(key)
         scan_dict["key"] = key
         L_energy, energies, Loss_energy_repara, Loss_energy_Reinforce, Energy_dict = self.__get_energy_loss(
-            energy_graph_batch, spin_logits_next, jnp.sum(log_p_prev_per_node[:-1], axis=0), node_gr_idx, subkey)
+            graphs, spin_logits_next, jnp.sum(log_p_prev_per_node[:-1], axis=0), node_gr_idx, subkey)
 
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[-1].set(log_p_0)

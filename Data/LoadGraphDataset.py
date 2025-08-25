@@ -13,6 +13,7 @@ from unipath import Path
 import os
 import jraph_utils
 from playground.Clusters.Meluxina import data_path
+from graph_with_metadata import GraphWithMeta
 
 
 class SolutionDatasetLoader:
@@ -119,9 +120,9 @@ class SolutionDatasetLoader:
             input_graph = batch_dict["input_graph"]
             energy_graph = batch_dict["energy_graph"]
             energy_graph_nodes = [int(el.n_node[0]) for el in energy_graph]
-            input_graph_nodes = [int(el.n_node[0]) for el in input_graph]
+            input_graph_nodes = [int(el.graph.n_node[0]) for el in input_graph]
             energy_graph_edges = [int(el.n_edge[0]) for el in energy_graph]
-            input_graph_edges = [int(el.n_edge[0]) for el in input_graph]
+            input_graph_edges = [int(el.graph.n_edge[0]) for el in input_graph]
 
             statistics_dict["input_graph"]["n_edges"].extend(input_graph_edges)
             statistics_dict["energy_graph"]["n_edges"].extend(energy_graph_edges)
@@ -368,7 +369,7 @@ class SolutionDataset_InMemory(Dataset):
 
         # print("compare edges of input graph and energy graph", energy_graphs.edges.shape, input_graph.edges.shape)
         # print("compare edges of input graph and energy graph", energy_graphs.edges, input_graph.edges.shape)
-        input_graph = input_graph._replace(edges = input_graph.edges.astype(np.float32))
+        input_graph = GraphWithMeta(graph=input_graph.graph._replace(edges = input_graph.graph.edges.astype(np.float32)), meta=input_graph.meta)
         energy_graphs = energy_graphs._replace(edges = energy_graphs.edges.astype(np.float32))
 
         return_dict = {"input_graph": input_graph, "energy_graph": energy_graphs, "energies": graph_dict["Energies"],

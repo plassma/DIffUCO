@@ -14,7 +14,7 @@ def gumbel_keys(key, shape):
     return -jnp.log(-jnp.log(u))
 
 
-def groupwise_sample(key, logits, group_ids):
+def groupwise_sample(key, logits, group_ids, num_segments=66):
     """Groupwise sampling from logits via the Gumbel-max trick."""
     if len(logits.shape) == 2:
         logits = logits[..., None]
@@ -24,7 +24,7 @@ def groupwise_sample(key, logits, group_ids):
     gumbel_noise = gumbel_keys(key, logits.shape)
     
     noisy_logits = logits + gumbel_noise
-    num_segments = 66  # jnp.max(group_ids) + 1
+    # jnp.max(group_ids) + 1
     # return segment_argmax(noisy_logits[..., 0], group_ids, num_segments=num_segments)[..., None]
     # Get the maximum noisy logit per group
     max_per_group = jax.ops.segment_max(noisy_logits, group_ids, num_segments=num_segments)
@@ -170,7 +170,7 @@ class DiffModel(nn.Module):
 
     # @partial(flax.linen.jit, static_argnums=0)
     def get_graph_info(self, jraph_graph_list):
-        first_graph = jraph_graph_list["graphs"][0]
+        first_graph = jraph_graph_list["graphs"][0].graph
         nodes = first_graph.nodes
         edges = first_graph.edges
         n_node = first_graph.n_node
@@ -226,12 +226,11 @@ class DiffModel(nn.Module):
         )
 
         spin_logits = out_dict["spin_logits"]
-        group_ids = jraph_graph_list["graphs"][0].globals["group_ids"]
 
         node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
 
         X_next, spin_log_probs, key = self.sample_from_model(
-            spin_logits, group_ids, key
+            spin_logits, jraph_graph_list["graphs"][0], key
         )
 
         graph_log_prob = jax.lax.stop_gradient(
@@ -317,7 +316,7 @@ class DiffModel(nn.Module):
         return X_next, spin_log_probs, spin_logits, graph_log_prob, key
 
     @partial(flax.linen.jit, static_argnums=0)
-    def sample_from_model(self, spin_logits, group_ids, key):
+    def sample_from_model(self, spin_logits, graph, key):
         key, subkey = jax.random.split(key)
 
         if spin_logits.shape[-1] == 2:
@@ -328,7 +327,7 @@ class DiffModel(nn.Module):
         else:
             if len(spin_logits.shape) == 2:
                 spin_logits = spin_logits[..., None]
-            X_next = groupwise_sample(subkey, spin_logits, group_ids)
+            X_next = groupwise_sample(subkey, spin_logits, graph.graph.globals["group_ids"], graph.meta["n_groups"])
             # X_next = X_next[:, 0, 0]
 
         one_hot_state = jax.nn.one_hot(X_next[..., 0], num_classes=self.n_bernoulli_features)
@@ -399,19 +398,19 @@ class DiffModel(nn.Module):
     @partial(flax.linen.jit, static_argnums=(0, 2))
     def sample_prior(self, j_graph, N_basis_states, key):
         if self.mode == "edge":
-            edges = j_graph.edges
+            edges = j_graph.graph.edges
             shape = (edges.shape[0], N_basis_states, 1)
         else:
-            nodes = j_graph.nodes  # todo plassma: edge mode
+            nodes = j_graph.graph.nodes  # todo plassma: edge mode
             shape = (nodes.shape[0], N_basis_states, 1)
 
         key, subkey = jax.random.split(key)
-        log_p_uniform = self._get_prior(shape, j_graph) # todo plassma: contains inf
+        log_p_uniform = self._get_prior(shape, j_graph.graph) # todo plassma: contains inf
 
         #X_prev = jax.random.categorical(
         #    key=subkey, logits=log_p_uniform, axis=-1, shape=log_p_uniform.shape[:-1]
         #)
-        X_prev = groupwise_sample(subkey, log_p_uniform, j_graph.globals["group_ids"])
+        X_prev = groupwise_sample(subkey, log_p_uniform, j_graph.graph.globals["group_ids"], j_graph.meta["n_groups"])
 
         one_hot_state = jax.nn.one_hot(X_prev, num_classes=self.n_bernoulli_features)
         return X_prev, one_hot_state, log_p_uniform, key

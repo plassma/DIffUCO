@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 import igraph as ig
 import matplotlib.pyplot as plt
+from graph_with_metadata import GraphWithMeta
 
 @dataclass
 class HCProblem:
@@ -72,7 +73,7 @@ class HCProblem:
 		mask_room_person = np.asarray((sender_types == 0) & (receiver_types == 3), dtype=bool)
 		group_ids = np.where(mask_room_person, senders_int, group_ids)
 
-		return {"node_types": node_types, "group_ids": group_ids}
+		return {"node_types": node_types, "group_ids": group_ids,} #  "rooms": self.rooms, "cabinets": self.cabinets, "things": self.things, "persons": self.persons
 
 
 ##
@@ -84,7 +85,9 @@ class HCProblem:
 #DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]), HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
 #			   HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
 
-DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)])]
+DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]),
+				 HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
+				 HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
 
 VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
 
@@ -132,7 +135,7 @@ def plot_graph(igraph, globals, n):
 
 	edge_colors = ["red" if globals_compact[e[1]] == 2 and globals_compact[e[0]] == 1 else "black" for e in edges]
 	vertex_colors = ["black" if globals_compact[i] != 2 else ("red" if owners_of_things[i] != holders_of_things[i] else "green") for i in range(len(globals_compact))]
-	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target=f"plot_{n}.png",vertex_color=vertex_colors) # edge_color=edge_colors
+	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target=f"plot_{n}.png",) # vertex_color=vertex_colors,edge_color=edge_colors
 
 	return mismatches
 
@@ -196,7 +199,7 @@ def solve_graph(igraph, globals):
 
 	return edges
 
-def group_ids_from_graph(jraph_graph_list):
+def group_ids_from_graph(jraph_graph_list): # todo: can be deleted
     graph = jraph_graph_list["graphs"][0]
     senders = graph.senders.astype(np.int32)
     receivers = graph.receivers.astype(np.int32)
@@ -261,11 +264,12 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g, double_edges=False, globals=globals)
 
-			
 
 			#Energy, boundEnergy, solution, runtime, H_graph_compl = self.solve_graph(H_graph, g)
 
 			Energy, boundEnergy, solution, runtime, compl_H_graph = self.solve_graph(H_graph,g)
+
+			H_graph = GraphWithMeta(graph=H_graph, meta={"rooms": problem.rooms, "cabinets": problem.cabinets, "things": problem.things, "persons": problem.persons})
 
 
 			solutions["Energies"].append(Energy + 0.0001)

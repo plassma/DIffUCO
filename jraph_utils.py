@@ -3,9 +3,9 @@ import jax.numpy as jnp
 import numpy as np
 import jax
 import time
-
+from graph_with_metadata import GraphWithMeta
 from sympy import group
-
+from collections import defaultdict
 
 def pad_with_graphs(graph: jraph.GraphsTuple,
                     n_node: int,
@@ -251,7 +251,18 @@ def pmap_graph_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs, retur
     else:
         return device_batched_graphs
 
+def batch_with_metadata(jraph_graph_list):
+    graphs, metadata = zip(*[(jgl.graph, jgl.meta) for jgl in jraph_graph_list])
+    # INSERT_YOUR_CODE
+    # Sum metadata dicts with the same integer keys
+    sum_metadata = {k: sum(md[k] for md in metadata) for k in metadata[0].keys()}
+    return GraphWithMeta(graph=jraph.batch_np(graphs), meta=sum_metadata)
+
 def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
+    return pmap_graph_list_better_meta(jraph_graph_list, dataset_statistics_dict, pad_func = pad_func, return_size = return_size) if isinstance(jraph_graph_list[0], GraphWithMeta) else \
+        pmap_graph_list_better_no_meta(jraph_graph_list, dataset_statistics_dict, pad_func = pad_func, return_size = return_size)
+
+def pmap_graph_list_better_no_meta(jraph_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
     n_devices = jax.local_device_count()
     n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
     # if (len(jraph_graph_list) % n_devices != 0):
@@ -294,6 +305,66 @@ def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func =
         return device_batched_graphs, max_pad_nodes_to, max_pad_edges_to
     else:
         return device_batched_graphs
+
+def pmap_graph_list_better_meta(jraph_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
+    n_devices = jax.local_device_count()
+    n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
+    # if (len(jraph_graph_list) % n_devices != 0):
+    #     print("batchsize", len(jraph_graph_list))
+    #     print("n_devices", n_devices)
+    #     raise ValueError("batchisze must be devisible by number of devices")
+    device_batched_graphs_with_meta = [batch_with_metadata(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device])
+                             for idx in range(n_devices)] ### TODO move this to collate function
+
+
+    
+    gid_pad = [0] + [jg.graph.globals["group_ids"].max() + 1 for jg in jraph_graph_list]
+    gid_cat = np.concatenate(list(jg.graph.globals["group_ids"] for jg in jraph_graph_list))
+
+    gid_pad = np.array(gid_pad)
+    gid_cat = np.array(gid_cat)
+
+    gid_pad = np.concatenate(list(np.ones_like(jg.graph.globals["group_ids"]) * gid_pad[i] for i, jg in enumerate(jraph_graph_list)))
+    gid_cat[gid_cat > 0] += gid_pad[gid_cat > 0]
+    
+    unique_ids, counts = jnp.unique(gid_cat, return_counts=True)
+
+    def lookup_count(gid):
+        return counts[jnp.argmax(unique_ids == gid)]
+
+    group_counts = np.array([lookup_count(gid) for gid in gid_cat])
+
+    device_batched_graphs_with_meta[0].graph.globals["group_ids"] = gid_cat
+    device_batched_graphs_with_meta[0].graph.globals["group_counts"] = group_counts
+
+    padded_graph_list, max_pad_nodes_to, max_pad_edges_to = pad_graphs_to_same_size_from_statistics([dbg.graph for dbg in device_batched_graphs_with_meta], dataset_statistics_dict, pad_func = pad_func)
+    device_batched_graphs = next(device_batch(padded_graph_list))
+    device_batched_graphs_with_meta = GraphWithMeta(graph=device_batched_graphs, meta=device_batched_graphs_with_meta[0].meta)
+
+
+    device_batched_graphs_with_meta.graph.globals["node_types"][-1, -1] = -1
+
+    node_types = device_batched_graphs_with_meta.graph.globals["node_types"]
+    node_type_counts = defaultdict(int)
+    nth_of_type = np.zeros_like(node_types[0])
+    for i, gid in enumerate(node_types[0]):
+        nth_of_type[i] = node_type_counts[gid]
+        node_type_counts[gid] += 1
+
+    device_batched_graphs_with_meta.graph.globals["nth_of_type"] = nth_of_type[None, :]
+    device_batched_graphs_with_meta.graph.globals["group_ids"][0, -1] = -1
+    device_batched_graphs_with_meta.graph.globals["group_ids"][0] = np.unique(device_batched_graphs_with_meta.graph.globals["group_ids"], return_inverse=True)[1] # debloat group ids to [0-N]
+    device_batched_graphs_with_meta.graph.globals["group_counts"][0][device_batched_graphs_with_meta.graph.globals["group_ids"][0] == 0] = 1 # plassma: fix logprob at constant edges
+    device_batched_graphs_with_meta.meta["n_groups"] = int(device_batched_graphs_with_meta.graph.globals["group_ids"][0].max()) + 1
+    #todo here: prepare owners tensors
+    
+    # print("make list", step2-step1)
+    # print("pad graphs", step3-step2)
+    # print("next generator", step4-step3)
+    if(return_size):
+        return device_batched_graphs_with_meta, max_pad_nodes_to, max_pad_edges_to
+    else:
+        return device_batched_graphs_with_meta
 
 def pmap_graph_list_to(jraph_graph_list, pad_nodes_to, pad_edges_to, pad_func = pad_with_graphs):
     n_devices = jax.local_device_count()

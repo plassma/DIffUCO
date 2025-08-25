@@ -158,12 +158,13 @@ class Base(ABC):
         sample = log_dict["X_0"][0,:,select_sample, 0]
         edges = [(graph_batch["graphs"][0].senders[0,i], graph_batch["graphs"][0].receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].senders[0,i] != graph_batch["graphs"][0].receivers[0,i]]
         graph = ig.Graph(edges=edges)
-        plot_graph(graph, graph_batch["graphs"][0].globals[0])
+        plot_graph(graph, graph_batch["graphs"][0].globals["node_types"][0], select_sample)
     
 
     def evaluation_step(self, params, graph_batch, energy_graph_batch, T, batched_key, mode="eval", key=None, n_sampling_rounds=None, sampling_temp=None, sampling_mode = "temps", epoch = None, epochs = None):
         start_forw_pass_time = time.time()
         loss, (log_dict, _) = self.pmap_sample(params, graph_batch, energy_graph_batch, T, batched_key)
+        # self.show_graph(graph_batch, log_dict, 0)
         end_forw_pass_time = time.time()
 
         #self.show_graph(graph_batch, log_dict)
