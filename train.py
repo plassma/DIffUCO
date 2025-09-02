@@ -29,6 +29,7 @@ import os
 import igraph as ig
 from EnergyFunctions.HCPEnergy import HCPEnergyClass
 import warnings
+from Networks.DiffModel import groupwise_sample
 
 # def my_formatwarning(message, category, filename, lineno, line=None):
 #   print(message, category)
@@ -769,7 +770,7 @@ class TrainMeanField:
 		wandb.finish()
 
 
-	def eval(self, epoch, mode = "eval"):
+	def eval(self, epoch, mode = "eval", plot = False):
 
 		dataloader = self.dataloader_val
 
@@ -788,6 +789,17 @@ class TrainMeanField:
 			batched_key = jax.random.split(subkey, num = len(jax.devices()))
 
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode, epoch = epoch, epochs = self.epochs)
+
+			if plot:
+				node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].graph.n_node.shape[1]), graph_batch["graphs"][0].graph.n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].graph.n_node.sum())
+				sample_0 = self.TrainerClass.EnergyClass.calculate_Energy_loss(graph_batch, log_dict["log_p_0"][0, :, 0], node_gr_idx)[1]["sample"]
+				sample_0_alt = groupwise_sample(None, log_dict["log_p_0"][0, :, 0], graph_batch["graphs"][0].graph.globals["group_ids"].squeeze(), graph_batch["graphs"][0].meta["n_groups"])
+
+				# todo: sample_0 and sample_0_alt are the same, but groupwise_sample like below does not yield the same results
+
+				samples = groupwise_sample(None, log_dict["log_p_0"][0], graph_batch["graphs"][0].graph.globals["group_ids"].squeeze(), graph_batch["graphs"][0].meta["n_groups"])
+				self.TrainerClass.EnergyClass.calculate_Energy_loss(graph_batch, log_dict["log_p_0"][0, :, 0], node_gr_idx)
+				self.show_graph(graph_batch, log_dict)
 
 
 			log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
@@ -892,7 +904,6 @@ class TrainMeanField:
 
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode)
 
-			self.show_graph(graph_batch, log_dict)
 			time_dict["forward_pass"].append(log_dict["time"]["forward_pass"])
 			time_dict["CE"].append(log_dict["time"]["CE"])
 
@@ -1097,25 +1108,37 @@ class TrainMeanField:
 
 
 
-	def _prepare_graphs(self, batch_dict,  mode = "train"):
-		if(self.graph_mode != "Transformer"):
-			if(self.graph_mode == "U_net"):
-				input_graph_dict = pmap_batch_U_net_graph_dict_and_pad(batch_dict["U_net_graph_dict"], k = self.pad_k)
+	def _prepare_graphs(self, batch_dict, mode="train"):
+		# Simple cache using a dict attribute on the instance
+		if not hasattr(self, "_prepare_graphs_cache"):
+			self._prepare_graphs_cache = {}
+
+		# Create a hashable key from batch_dict and mode
+		# We assume batch_dict keys are always the same and values are hashable or convertible to something hashable
+		# For safety, use id() of objects (since graphs are likely not hashable)
+		cache_key = (
+			batch_dict["input_graph"][0].meta["id"],
+		)
+
+		if cache_key in self._prepare_graphs_cache:
+			return self._prepare_graphs_cache[cache_key]
+
+		if self.graph_mode != "Transformer":
+			if self.graph_mode == "U_net":
+				input_graph_dict = pmap_batch_U_net_graph_dict_and_pad(batch_dict["U_net_graph_dict"], k=self.pad_k)
 				_, energy_graph = self._pad_graphs(batch_dict["input_graph"], batch_dict["energy_graph"])
-				#self.pad_k = 1.3
-			elif(self.graph_mode != "U_net"):
-
-				input_graph, energy_graph = self._pad_graphs(batch_dict["input_graph"], batch_dict["energy_graph"], mode = mode)
-
+			elif self.graph_mode != "U_net":
+				input_graph, energy_graph = self._pad_graphs(
+					batch_dict["input_graph"], batch_dict["energy_graph"], mode=mode
+				)
 				input_graph_dict = {"graphs": [input_graph]}
-		elif(self.graph_mode == "Transformer"):
+		elif self.graph_mode == "Transformer":
 			input_graph, energy_graph = self._pad_graphs(batch_dict["input_graph"], batch_dict["energy_graph"])
-
-			# X_pos_encoding = self._add_node_encoding(input_graph)
-			# input_graph = input_graph._replace(nodes = X_pos_encoding)
 			input_graph_dict = {"graphs": [input_graph]}
 
-		return input_graph_dict, energy_graph
+		result = (input_graph_dict, energy_graph)
+		self._prepare_graphs_cache[cache_key] = result
+		return result
 
 	@partial(jax.jit, static_argnums = (0,))
 	def _add_positional_embeddings(self, input_graph, dim = 64, L = 1.42):
@@ -1272,8 +1295,9 @@ class TrainMeanField:
 		total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
 		total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
 		if self.mode_node_edge == "edge":
+			n_edge -= (graphs.globals["group_ids"] == 0).sum()
 			edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
-			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), edge_graph_idx, n_graph) / n_edge[:, None,None] # (np.array([graphs.globals["group_ids"].max(), 0]) + 1)[:, None, None]
+			mean_prob_per_graph = jraph.segment_sum((jnp.exp(spin_log_probs) - 1. * (spin_log_probs==0)), edge_graph_idx, n_graph) / n_edge[:, None,None] # (np.array([graphs.globals["group_ids"].max(), 0]) + 1)[:, None, None]
 		else:
 			node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
 			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]

@@ -1,6 +1,6 @@
 import os
 import random
-
+import time
 import jax
 from torch.utils.data import Dataset
 import pickle
@@ -15,6 +15,11 @@ import jraph_utils
 from playground.Clusters.Meluxina import data_path
 from graph_with_metadata import GraphWithMeta
 
+def benchmark_dataloader(dataloader):
+    start = time.time()
+    for _ in dataloader:
+        pass
+    print("dataloader time\n\\n" + ("-"*100) + "\n", time.time() - start)
 
 class SolutionDatasetLoader:
     def __init__(self, config = {}, dataset="MIS", problem="MIS", batch_size=32, relaxed=False, seed=123, mode = "train"):
@@ -92,6 +97,7 @@ class SolutionDatasetLoader:
         collate_function = self.pmap_collate
 
         self.dataset_train = dataset_train
+        self.num_workers = 1
         self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = self.config["mode_node_edge"] == "node", collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None # todo plassma: undo drop last
         self.dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if dataset_test != None else None
         self.dataloader_val = DataLoader(dataset_val, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if VAL_DATASET else None
@@ -283,7 +289,13 @@ class SolutionDataset_InMemory(Dataset):
 
         self.get_dataset_paths(config, mode=mode, seed=seed)
         self._init_MCMCBuffer()
+        # Initialize cache for loaded data
+        self._data_cache = {}
+        # Optional: limit cache size to prevent memory issues
+        self._max_cache_size = getattr(config, 'max_cache_size', 1000)
         #super().__init__(self.base_path, None, None, None)
+        for i in range(len(self)): # init cache
+            self.__getitem__(i)
 
     def _init_MCMCBuffer(self):
         self.MCMCBuffer = [None for i in range(self.__len__())]
@@ -342,8 +354,13 @@ class SolutionDataset_InMemory(Dataset):
         return self.n_graphs
 
     def __getitem__(self, idx):
+        # Check if data is already cached
+        if idx in self._data_cache:
+            return self._data_cache[idx]
 
+        # Load data from disk
         with open(self.base_path + f"idx_{idx}_solutions.pickle", "rb") as file:
+            print("loading graph from HDD")
             graph_dict = pickle.load(file)
 
         input_graph = graph_dict["H_graphs"]
@@ -374,6 +391,16 @@ class SolutionDataset_InMemory(Dataset):
 
         return_dict = {"input_graph": input_graph, "energy_graph": energy_graphs, "energies": graph_dict["Energies"],
                        "U_net_graph_dict": U_net_graph_dict, "bs_bins": graph_dict["gs_bins"]}
+        
+        # Cache the result
+        self._data_cache[idx] = return_dict
+        
+        # Optional: limit cache size (simple LRU-like behavior)
+        if len(self._data_cache) > self._max_cache_size:
+            # Remove the oldest entry (first key)
+            oldest_key = next(iter(self._data_cache))
+            del self._data_cache[oldest_key]
+            
         return return_dict
 
 

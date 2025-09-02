@@ -136,7 +136,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": None,"n_random_node_features": 16, "n_diffusion_steps": 3}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": "lbgn6h4m","n_random_node_features": 16, "n_diffusion_steps": args.n_diffusion_steps[0]}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -269,9 +269,9 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 1e-4,
+        "lr": 1e-3,
         "batch_size": 30, # H
-        "N_basis_states": 30, # n_s
+        "N_basis_states": 100, # n_s
 
         "random_node_features": True,
         "n_random_node_features": 5,
@@ -291,12 +291,12 @@ def run( flexible_config, overwrite = True):
         "n_features_list_messages": [64, 64],
         "n_features_list_encode": [30],
         "n_features_list_decode": [64],
-        "n_message_passes": 2,
+        "n_message_passes": 5,
         "message_passing_weight_tied": False,
         "linear_message_passing": True,
         "edge_updates": False,
         "n_diffusion_steps": 1,
-        "beta_factor": 0.1,
+        "beta_factor": 1,
         "noise_potential": "annealed_obj",
 
         "time_conditioning": True,
@@ -316,7 +316,7 @@ def run( flexible_config, overwrite = True):
         "proj_method": "None",
         "diff_schedule": "DiffUCO",
         "mov_average": 0.05,
-        "sampling_temp": 1.4,
+        "sampling_temp": 1.,
         "n_sampling_rounds": 5,
         "n_test_basis_states": 20,
         "bfloat16": False,

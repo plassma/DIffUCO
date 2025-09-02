@@ -255,8 +255,8 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 		edges, nodes = 0, 0
 		for idx, problem in enumerate(DUMMY_SAMPLES):
 			g = problem.igraph
-			edges += g.ecount()
-			nodes += g.vcount()
+			#edges += g.ecount()
+			#nodes += g.vcount()
 			globals = problem.globals
 
 			edges = solve_graph(g, globals["node_types"])
@@ -266,10 +266,9 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 
 
 			#Energy, boundEnergy, solution, runtime, H_graph_compl = self.solve_graph(H_graph, g)
-
 			Energy, boundEnergy, solution, runtime, compl_H_graph = self.solve_graph(H_graph,g)
 
-			H_graph = GraphWithMeta(graph=H_graph, meta={"rooms": problem.rooms, "cabinets": problem.cabinets, "things": problem.things, "persons": problem.persons})
+			H_graph = GraphWithMeta(graph=H_graph, meta={"rooms": problem.rooms, "cabinets": problem.cabinets, "things": problem.things, "persons": problem.persons, "id": idx})
 
 
 			solutions["Energies"].append(Energy + 0.0001)

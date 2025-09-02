@@ -255,8 +255,9 @@ def batch_with_metadata(jraph_graph_list):
     graphs, metadata = zip(*[(jgl.graph, jgl.meta) for jgl in jraph_graph_list])
     # INSERT_YOUR_CODE
     # Sum metadata dicts with the same integer keys
+    concat_metadata = {f"{k}_concat": [md[k] for md in metadata] for k in metadata[0].keys()}
     sum_metadata = {k: sum(md[k] for md in metadata) for k in metadata[0].keys()}
-    return GraphWithMeta(graph=jraph.batch_np(graphs), meta=sum_metadata)
+    return GraphWithMeta(graph=jraph.batch_np(graphs), meta=sum_metadata | concat_metadata)
 
 def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
     return pmap_graph_list_better_meta(jraph_graph_list, dataset_statistics_dict, pad_func = pad_func, return_size = return_size) if isinstance(jraph_graph_list[0], GraphWithMeta) else \

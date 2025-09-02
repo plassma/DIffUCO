@@ -33,6 +33,16 @@ def groupwise_sample(key, logits, group_ids, num_segments=66):
     is_max = jnp.where((group_ids == 0)[..., None, None], 1, is_max)
     return is_max.astype(jnp.int32)  # Indices into logits, one per group
 
+class DummyEdgeEmbedder(nn.Module):
+    def setup(self):
+        layers = [nn.Dense(features=626), jax.nn.relu, lambda x: x.T, nn.Dense(features=64), jax.nn.relu, lambda x: x.T, nn.Dense(features=626), jax.nn.relu, lambda x: x.T]
+        self.mlp = nn.Sequential(layers)
+
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        return self.mlp(x)
+    
+
 
 class DiffModel(nn.Module):
     """
@@ -122,49 +132,63 @@ class DiffModel(nn.Module):
             get_sinusoidal_positional_encoding, in_axes=(0, None, None)
         )
         ### TODO random node feature key is different during eval and sample, force them to be the same?
-        self.node_embedder = nn.Embed(
+        self.node_type_embedder = nn.Embed(
             num_embeddings=5, features=self.n_random_node_features // 2
         )
 
         self.edge_embedder = nn.Embed(num_embeddings=626, features=64)
+        self.node_embedder = nn.Embed(num_embeddings=250, features=64)
+
+        self.dummy_edge_embedder = DummyEdgeEmbedder()
 
     @flax.linen.jit
     def __call__(
-        self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key
+        self, jraph_graph_list, X_prev, rand_edge_features, t_idx_per_node, key
     ):
-        #node_embeddings = self.node_embedder(jraph_graph_list["graphs"][0].globals["node_types"])
-        #rand_node_features += jnp.concatenate(
-        #    (
-        #        node_embeddings[jraph_graph_list["graphs"][0].senders],
-        #        node_embeddings[jraph_graph_list["graphs"][0].receivers],
-        #    ),
-        #    axis=-1,
-        #)
-        # todo plassma: use random node features again
-        #node_embeddings = self.edge_embedder(jnp.arange(X_prev.shape[0]))
+        # Get node type embeddings for sender and receiver nodes
+        node_type_embeddings = self.node_type_embedder(jraph_graph_list["graphs"][0].graph.globals["node_types"])
+        edge_type_embeddings = jnp.concatenate(
+            (
+                node_type_embeddings[jraph_graph_list["graphs"][0].graph.senders],
+                node_type_embeddings[jraph_graph_list["graphs"][0].graph.receivers],
+            ),
+            axis=-1,
+        )
+        
+        # Combine random node features with node type embeddings
+        rand_edge_features = jnp.concatenate((rand_edge_features, edge_type_embeddings), axis=-1)
 
-        #X_prev = self._add_random_nodes_and_time_index(
-        #    X_prev, rand_node_features, t_idx_per_node
-        #)  # todo plassma: useful edge features?!
-        #key, subkey = jax.random.split(key)
-        #node_embeddings = jnp.concatenate([node_embeddings, jax.random.uniform(subkey, shape=node_embeddings.shape)], axis=-1)
+        # Create edge embeddings with time encoding and random features
+        edge_embeddings = self._add_random_nodes_and_time_index(
+            X_prev, rand_edge_features, t_idx_per_node
+        )
+        key, subkey = jax.random.split(key)
+        #node_embeddings = self.node_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.nodes.shape[0]))
+        node_embeddings = jnp.repeat(node_type_embeddings[jraph_graph_list["graphs"][0].graph.globals["node_types"]], 4, axis=-1)
+        node_embeddings = jnp.concatenate((node_embeddings, jax.random.normal(subkey, node_embeddings.shape)), axis=-1)
 
+        cheat = True
+
+        if cheat:
+            node_embeddings = self.node_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.nodes.shape[0]))
+            edge_embeddings = self.edge_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.edges.shape[0]))
+
+
+        
+        # Pass to GNN - use edge_embeddings as node features for the GNN
         #embeddings = self.encode_process_decode(
-        #    jraph_graph_list, X_prev, node_embeddings
-        #)  # (11551, 1, 64) | (3151, 1, 64)
-
-        embeddings = self.edge_embedder(jnp.arange(X_prev.shape[0]))[:, None, :]
-        #embeddings = jnp.pad(X_prev, ((0,0),(0, 45))) #debug: replace GNN with its input
-
-        #bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis=-2)
-        #embeddings = bernoulli_embeddings
+        #    {"graphs": [jraph_graph_list["graphs"][0].graph]}, edge_embeddings, node_embeddings
+        #)
+        embeddings = self.dummy_edge_embedder(edge_embeddings)
+        # embeddings shape should be (num_edges, embedding_dim) for edge mode
+        # or (num_nodes, embedding_dim) for node mode
 
         out_dict = {}
-        # out_dict = self.HeadModel(jraph_graph_list, rand_node_features, out_dict) # original embeddings shape: [626,1,64]
-        out_dict = self.HeadModel(jraph_graph_list, embeddings, out_dict)
-        # rand_node_features = rand_node_features[:, jnp.newaxis, :]
+        out_dict = self.HeadModel(jraph_graph_list, embeddings[:, None, :], out_dict) # in shape: (626, 1, 64)
+        # embeddings[:, None, :] shape: (num_edges/nodes, 1, embedding_dim)
+        rand_edge_features = rand_edge_features[:, jnp.newaxis, :]
         out_dict["rand_node_features"] = (
-            rand_node_features  # (11551, 1, 2) | (3151, 1, 2)
+            rand_edge_features  # (11551, 1, 2) | (3151, 1, 2)
         )
         return out_dict, key
 
@@ -233,6 +257,7 @@ class DiffModel(nn.Module):
             spin_logits, jraph_graph_list["graphs"][0], key
         )
 
+        n_node -= (jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0).sum()
         graph_log_prob = jax.lax.stop_gradient(
             jnp.exp(
                 (
@@ -241,6 +266,7 @@ class DiffModel(nn.Module):
                 )[:-1]
             )
         )
+
         out_dict["pred_entropy"] = - spin_logits * jnp.exp(spin_logits)
         out_dict["X_next"] = X_next  # [3151, 1]
         out_dict["spin_log_probs"] = spin_log_probs  # [3151, 1]
@@ -373,7 +399,7 @@ class DiffModel(nn.Module):
         """
 
         shape = X_T.shape[0:-1]
-        log_p_uniform = self._get_prior(shape)
+        log_p_uniform = self._get_prior(shape, j_graph.graph)
 
         one_hot_state = jax.nn.one_hot(
             X_T[..., -1], num_classes=self.n_bernoulli_features

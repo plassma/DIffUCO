@@ -69,7 +69,7 @@ class NormalHeadModule(nn.Module):
             out_dict["spin_logits"] = spin_logits
             return out_dict
         
-        log_probs = grouped_log_softmax(spin_logits, jraph_graph_list)
+        log_probs = grouped_log_softmax(spin_logits, jraph_graph_list, jraph_graph_list["graphs"][0].meta["n_groups"])
         log_probs = jnp.where(jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0, 0, log_probs[..., 0])[..., None]
         out_dict["spin_logits"] = log_probs
         return out_dict
