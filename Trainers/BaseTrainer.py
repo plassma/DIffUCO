@@ -47,7 +47,7 @@ class Base(ABC):
         self.pmap_sample_for_estimate_v2 = jax.pmap(self.sample_for_estimate_v2, in_axes=(0, 0, 0, None, None, 0))
         #self.pmap_sample_MCMC = jax.pmap(self.sample_MCMC, in_axes=(0, 0, 0, None, 0))
         self.pmap_update = jax.pmap(self.__update_params, in_axes=(0, 0, 0))
-        self.pmap_loss_backward = jax.pmap(self.loss_backward, in_axes=(0, 0, 0, 0, None, 0), axis_name="device")
+        self.pmap_loss_backward = jax.pmap(self.loss_backward, in_axes=(0, 0, 0, 0, None, 0,None), axis_name="device")
 
         self.vmapped_sample_forward_diff_process = jax.vmap(self.NoiseDistrClass.sample_forward_diff_process, in_axes=(1, None, 0), out_axes=(1,1, 0))
 
@@ -145,12 +145,12 @@ class Base(ABC):
     def _apply_CE(self):
         pass
 
-    def train_step(self, params, opt_state, graphs, energy_graph_batch, T, key):
+    def train_step(self, params, opt_state, graphs, energy_graph_batch, T, key, epoch_temp=1.0):
 
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
 
-        (loss, (log_dict, _)), params, opt_state = self.pmap_loss_backward_step(params, opt_state, graphs, energy_graph_batch, T, batched_key)
+        (loss, (log_dict, _)), params, opt_state = self.pmap_loss_backward_step(params, opt_state, graphs, energy_graph_batch, T, batched_key, epoch_temp=epoch_temp)
         return params, opt_state, loss, (log_dict, energy_graph_batch, key)
 
 
@@ -782,16 +782,16 @@ class Base(ABC):
         params = optax.apply_updates(params, grad_update)
         return params, opt_state
 
-    def pmap_loss_backward_step(self, params, opt_state, graphs, energy_graph_batch, T, key):
+    def pmap_loss_backward_step(self, params, opt_state, graphs, energy_graph_batch, T, key, epoch_temp=1.0):
         (loss, (log_dict, key)), params, opt_state = self.pmap_loss_backward(params, opt_state, graphs,
                                                                              energy_graph_batch, T,
-                                                                             key)
+                                                                             key, epoch_temp)#epoch_temp=epoch_temp
 
         return (loss, (log_dict, key)), params, opt_state
 
     @partial(jax.jit, static_argnums=(0,))
-    def loss_backward(self, params, opt_state, graphs, energy_graph_batch, T, key):
-        (loss, (log_dict, key)), grad = self.loss_grad(params, graphs, energy_graph_batch, T, key)
+    def loss_backward(self, params, opt_state, graphs, energy_graph_batch, T, key, epoch_temp=1.0):
+        (loss, (log_dict, key)), grad = self.loss_grad(params, graphs, energy_graph_batch, T, key, epoch_temp=epoch_temp)
 
         grad = jax.lax.pmean(grad, axis_name='device')
         params, opt_state = self.__update_params(params, grad, opt_state)

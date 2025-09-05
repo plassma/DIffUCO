@@ -12,13 +12,13 @@ class Reinforce(Base):
         self.inner_update_steps = 1
         self.mode = self.config["mode_node_edge"] # todo plassma: move 
 
-        self.diffusion_loss_train = lambda a,b,c,d,e: self.diffusion_loss(a, b, c, d, e,  "train")
+        self.diffusion_loss_train = lambda a,b,c,d,e,f: self.diffusion_loss(a, b, c, d, e, "train", f)
 
         self.diffusion_loss_eval = lambda a,b,c,d,e: self._environment_steps_scan(a, b, c, d, e, "eval")
 
 
-    def get_loss(self, params, graphs, energy_graph_batch, T, key):
-        return self.diffusion_loss_train(params, graphs, energy_graph_batch, T, key)
+    def get_loss(self, params, graphs, energy_graph_batch, T, key, epoch_temp=1.0):
+        return self.diffusion_loss_train(params, graphs, energy_graph_batch, T, key, epoch_temp)
 
     def sample(self, params, graphs, energy_graph_batch, T, key):
         return self.diffusion_loss_eval(params, graphs, energy_graph_batch, T, key)
@@ -103,8 +103,8 @@ class Reinforce(Base):
             L_repara), jax.lax.stop_gradient(L_REINFORCE), Energy_dict
 
     @partial(jax.jit, static_argnums=(0,))
-    def __get_Noise_energy_loss(self, jraph_graph, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key=None):
-        Noise_Energy_per_graph, sum_log_p_prev_per_node = self.Noise_func(jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key)
+    def __get_Noise_energy_loss(self, jraph_graph, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key=None, epoch_temp=1.0):
+        Noise_Energy_per_graph, sum_log_p_prev_per_node = self.Noise_func(jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key, epoch_temp)
         Noise_Energy_per_graph = (-1)*Noise_Energy_per_graph
         
         jraph_graph = jraph_graph["graphs"][0].graph
@@ -130,8 +130,8 @@ class Reinforce(Base):
         Noise_Loss = (L_REINFORCE + L_repara)
         return Noise_Loss, jax.lax.stop_gradient(L_repara), jax.lax.stop_gradient(L_repara), jax.lax.stop_gradient(L_REINFORCE)
 
-    @partial(jax.jit, static_argnums=(0,-1))
-    def diffusion_loss(self, params, graphs, energy_graph_batch, T, key, mode):
+    @partial(jax.jit, static_argnums=(0,-2))
+    def diffusion_loss(self, params, graphs, energy_graph_batch, T, key, mode, epoch_temp=1.0):
         print("function is being jitted")
         if(mode == "train"):
             N_basis_states = self.N_basis_states
@@ -192,7 +192,7 @@ class Reinforce(Base):
             graph_log_prob = out_dict["graph_log_prob"]
 
             key, subkey = jax.random.split(key)
-            log_p_t = self.NoiseDistrClass.get_log_p_T_0(graphs, X_prev, X_next, model_step_idx, T, subkey)
+            log_p_t = self.NoiseDistrClass.get_log_p_T_0(graphs, X_prev, X_next, model_step_idx, T, subkey, epoch_temp=epoch_temp)
             log_p_0_T = log_p_0_T.at[i].set(log_p_t[:-1])
 
             Entropy_Loss, Entropy, Loss_entropy_repara, Loss_entropy_Reinforce = self.__get_entropy_loss(
@@ -204,7 +204,7 @@ class Reinforce(Base):
             key, subkey = jax.random.split(key)
             Noise_Loss, Noise_Energy, Loss_noise_repara, Loss_noise_Reinforce = self.__get_Noise_energy_loss(
                 graphs, X_prev, spin_logits_prev, spin_logits_next, log_p_prev_per_node, model_step_idx,
-                node_gr_idx, T, subkey)
+                node_gr_idx, T, subkey, epoch_temp=epoch_temp)
             L_noise += Noise_Loss
             L_noise_repara += Loss_noise_repara
             L_noise_Reinforce += Loss_noise_Reinforce

@@ -1,5 +1,5 @@
-sample_prior returns wrong log_p
+!!! probs sometimes not decided (0.5|0.5|0|0...) -> anneal sampling temp?
 
-does inmemory dataset call pickle.load in every getitem op??
-
-why is logprob in diffModel.sample_prior not 0 for groups with size 1?
+order constraint loss product difference - interview chatgpt
+basisstates
+temperature

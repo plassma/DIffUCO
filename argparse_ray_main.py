@@ -1,6 +1,7 @@
 import os
 import argparse
 from train import TrainMeanField
+import numpy as np
 
 
 parser = argparse.ArgumentParser()
@@ -128,6 +129,7 @@ def meanfield_run():
         pass
 
     #run_PPO_experiment_func = lambda flex_conf: run_PPO_experiment_hydra()
+    np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True, precision=3)
     if(local_mode):
         import jax
         #jax.config.update("jax_debug_nans", True)
@@ -136,7 +138,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": "lbgn6h4m","n_random_node_features": 16, "n_diffusion_steps": args.n_diffusion_steps[0]}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": None,"n_random_node_features": 16, "n_diffusion_steps": args.n_diffusion_steps[0]}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -281,7 +283,7 @@ def run( flexible_config, overwrite = True):
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
-        "stop_epochs": 800,
+        "stop_epochs": 2000,
 
         ### TODO rework network and remove edge updates
         "n_hidden_neurons": 64,

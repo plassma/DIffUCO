@@ -14,24 +14,23 @@ def gumbel_keys(key, shape):
     return -jnp.log(-jnp.log(u))
 
 
-def groupwise_sample(key, logits, group_ids, num_segments=66):
-    """Groupwise sampling from logits via the Gumbel-max trick."""
+def groupwise_sample(key, logits, group_ids, num_segments=66, temp=0.1):
+    """Groupwise sampling from logits via the Gumbel-max trick.
+    Assumes logits are already groupwise log_softmax-normalized.
+    Adds temperature scaling to logits before sampling.
+    """
     if len(logits.shape) == 2:
         logits = logits[..., None]
     if key is None:
         key = jax.random.PRNGKey(0)
-   
+
     gumbel_noise = gumbel_keys(key, logits.shape)
-    
-    noisy_logits = logits + gumbel_noise
-    # jnp.max(group_ids) + 1
-    # return segment_argmax(noisy_logits[..., 0], group_ids, num_segments=num_segments)[..., None]
-    # Get the maximum noisy logit per group
+    noisy_logits = logits / temp + gumbel_noise
+
     max_per_group = jax.ops.segment_max(noisy_logits, group_ids, num_segments=num_segments)
-    # Broadcast max back to each position to find the groupwise argmax
     is_max = (noisy_logits == max_per_group[group_ids])
     is_max = jnp.where((group_ids == 0)[..., None, None], 1, is_max)
-    return is_max.astype(jnp.int32)  # Indices into logits, one per group
+    return is_max.astype(jnp.int32)
 
 class DummyEdgeEmbedder(nn.Module):
     def setup(self):

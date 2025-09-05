@@ -285,8 +285,8 @@ class TrainMeanField:
 		self.EnergyClass = EnergyClass
 		self.relaxed_energy = EnergyClass.calculate_Energy
 		self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None, 0), out_axes=(1))
-		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, 0),
+		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None, 0, None), out_axes=(1))
+		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None, 0, None),
 														out_axes=(1))
 		self.config["vmapped_energy_loss_func"] = self.vmapped_relaxed_energy_for_Loss
 		self.config["vmapped_energy_func"] = self.vmapped_relaxed_energy
@@ -618,7 +618,7 @@ class TrainMeanField:
 			wandb.log({"MCMC/Energy": np.mean(self.MCMCSamplerClass.MCMC_Energ_list)})
 			self.MCMCSamplerClass._reset_MCMC_Energy_list()
 
-	def train_step(self, batch_dict, plot=False):
+	def train_step(self, batch_dict, plot=False, epoch_temp=1.0):
 		### TODO add code that switches of the buffer
 		step1 = time.time()
 		graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "train")
@@ -626,7 +626,7 @@ class TrainMeanField:
 		batching_time = step2 - step1
 
 		self.params, self.opt_state, loss, (log_dict, energy_graph_batch, self.key) = self.TrainerClass.train_step(self.params, self.opt_state, graph_batch,
-																							  energy_graph_batch, self.T, self.key)
+																							  energy_graph_batch, self.T, self.key, epoch_temp=epoch_temp)
 		
 		if plot:
 			node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].graph.n_node.shape[1]), graph_batch["graphs"][0].graph.n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].graph.n_node.sum())
@@ -681,7 +681,7 @@ class TrainMeanField:
 				print("batchsize is", len(gt_normed_energies))
 
 				step1 = time.time()
-				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict)
+				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict, epoch_temp= max(1 - epoch * 4/self.epochs, 0.001))
 				step3 = time.time()
 
 				if("metrics" in log_dict.keys()):

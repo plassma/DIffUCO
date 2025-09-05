@@ -29,7 +29,7 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
     def calculate_noise_distr_reward(self, noise_distr_step, entropy_reward):
         return -(noise_distr_step - entropy_reward)
 
-    def get_log_p_T_0(self, jraph_graph, X_prev, X_next, t_idx, T, key=None):
+    def get_log_p_T_0(self, jraph_graph, X_prev, X_next, t_idx, T, key=None, epoch_temp=1.0):
         T = jnp.max(jnp.array([T, 10**-6]))
         
         
@@ -45,24 +45,24 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
 
         batched_key = jax.random.split(key, num=X_prev.shape[1])
 
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, node_gr_idx, batched_key) # Energy called here with (11551, 20, 1)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, node_gr_idx, batched_key, epoch_temp) # Energy called here with (11551, 20, 1)
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         log_p = (-1)*gamma_t/T*Noise_Energy_per_graph
         return log_p
 
     @partial(jax.jit, static_argnums=(0,))
-    def calc_noise_loss(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key=None):
+    def calc_noise_loss(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T, key=None, epoch_temp=1.0):
         gamma_t = self.beta_arr[model_step_idx]
         batched_key = jax.random.split(key, num=X_prev.shape[1])
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, spin_logits_prev, node_gr_idx, batched_key) # called here with (11551, 20, 1, 2)!
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, spin_logits_prev, node_gr_idx, batched_key, epoch_temp) # called here with (11551, 20, 1, 2)!
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         return (-1)*gamma_t*Noise_Energy_per_graph, jnp.sum(log_p_prev_per_node[:-1], axis = 0)
 
     @partial(jax.jit, static_argnums=(0,))
-    def calc_noise_step(self, jraph_graph, X_prev, X_next, model_step_idx, node_gr_idx, T, noise_rewards_arr):
+    def calc_noise_step(self, jraph_graph, X_prev, X_next, model_step_idx, node_gr_idx, T, noise_rewards_arr, epoch_temp=1.0):
         gamma_t = self.beta_arr[model_step_idx]
         reward_idx = jnp.where(model_step_idx - 1 < 0, jnp.zeros_like(model_step_idx), model_step_idx - 1)  ### when model_step_idx - 1 == 1 hamma_t shoudl be 0!
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy(jraph_graph, X_prev, node_gr_idx)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy(jraph_graph, X_prev, node_gr_idx, epoch_temp)
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         noise_step_value = gamma_t*Noise_Energy_per_graph
         noise_rewards_arr = noise_rewards_arr.at[reward_idx].set(noise_rewards_arr[reward_idx] - noise_step_value)
