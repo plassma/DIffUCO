@@ -142,7 +142,7 @@ class DiffModel(nn.Module):
 
     @flax.linen.jit
     def __call__(
-        self, jraph_graph_list, X_prev, rand_edge_features, t_idx_per_node, key
+        self, jraph_graph_list, X_prev, rand_edge_features_in, t_idx_per_node, key
     ):
         # Get node type embeddings for sender and receiver nodes
         node_type_embeddings = self.node_type_embedder(jraph_graph_list["graphs"][0].graph.globals["node_types"])
@@ -155,7 +155,7 @@ class DiffModel(nn.Module):
         )
         
         # Combine random node features with node type embeddings
-        rand_edge_features = jnp.concatenate((rand_edge_features, edge_type_embeddings), axis=-1)
+        rand_edge_features = jnp.concatenate((rand_edge_features_in, edge_type_embeddings), axis=-1)
 
         # Create edge embeddings with time encoding and random features
         edge_embeddings = self._add_random_nodes_and_time_index(
@@ -187,7 +187,7 @@ class DiffModel(nn.Module):
         # embeddings[:, None, :] shape: (num_edges/nodes, 1, embedding_dim)
         rand_edge_features = rand_edge_features[:, jnp.newaxis, :]
         out_dict["rand_node_features"] = (
-            rand_edge_features  # (11551, 1, 2) | (3151, 1, 2)
+            rand_edge_features_in  # (11551, 1, 2) | (3151, 1, 2)
         )
         return out_dict, key
 
@@ -396,25 +396,25 @@ class DiffModel(nn.Module):
         :param X_T: shape =  (batched_graph_nodes, n_states, 1)
         :return:
         """
+        j_graph = j_graph.graph
+        shape = X_T.shape#[0:-1]
+        log_p_uniform = self._get_prior(shape, j_graph)
 
-        shape = X_T.shape[0:-1]
-        log_p_uniform = self._get_prior(shape, j_graph.graph)
-
-        one_hot_state = jax.nn.one_hot(
-            X_T[..., -1], num_classes=self.n_bernoulli_features
-        )
-        log_p_X_T_per_node = jnp.sum(log_p_uniform * one_hot_state, axis=-1)
+        log_p_X_T_per_node = jnp.sum(log_p_uniform * X_T, axis=-1)
 
         nodes = j_graph.nodes
+        edges = j_graph.edges
         n_node = j_graph.n_node
+        n_edge = j_graph.n_edge
         n_graph = j_graph.n_node.shape[0]
         graph_idx = jnp.arange(n_graph)
         total_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-        node_graph_idx = jnp.repeat(
-            graph_idx, n_node, axis=0, total_repeat_length=total_nodes
+        total_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
+        edge_graph_idx = jnp.repeat(
+            graph_idx, n_edge, axis=0, total_repeat_length=total_edges
         )
 
-        log_p_X_T = self.__get_log_prob(log_p_X_T_per_node, node_graph_idx, n_graph)
+        log_p_X_T = self.__get_log_prob(log_p_X_T_per_node, edge_graph_idx, n_graph)
 
         # graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(log_p_X_T_per_node, node_graph_idx, n_graph)/(n_node[:,None]*self.n_bernoulli_features))[:-1]))
         # print("average prob 0", jnp.mean(graph_log_prob))

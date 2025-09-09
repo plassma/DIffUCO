@@ -279,7 +279,7 @@ class PPO(Base):
         energy_graph_batch = scan_dict["energy_graph_batch"]
 
         model_step_idx = jnp.array([i / self.eval_step_factor], dtype=jnp.int16)
-        model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1), dtype=jnp.int16)
+        model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.edges.shape[0], 1), dtype=jnp.int16)
 
         key, subkey = jax.random.split(scan_dict["key"])
         scan_dict["key"] = key
@@ -299,9 +299,14 @@ class PPO(Base):
 
         scan_dict["rand_node_features_diff_steps"] = scan_dict["rand_node_features_diff_steps"].at[i].set(rand_node_features)
 
+        key, subkey = jax.random.split(scan_dict["key"])
+        scan_dict["key"] = key
+
+        batched_key = jax.random.split(subkey, num=X_prev.shape[1])
+
         entropy_step = self._get_entropy_step(energy_graph_batch, state_log_probs, node_gr_idx)
         ### TODO is this still correct for annealed noise distr? Anneled reward should be given to step i-1?!
-        scan_dict["noise_rewards"] = self._get_noise_distr_step(energy_graph_batch, X_prev, X_next, model_step_idx, node_gr_idx, T, scan_dict["noise_rewards"])
+        scan_dict["noise_rewards"] = self._get_noise_distr_step(energy_graph_batch, X_prev, X_next, model_step_idx, node_gr_idx, T, scan_dict["noise_rewards"], batched_key)
 
         X_prev = X_next
         scan_dict["Xs_over_different_steps"] = scan_dict["Xs_over_different_steps"].at[i + 1].set(X_next)
@@ -332,7 +337,7 @@ class PPO(Base):
             N_basis_states = self.N_test_basis_states
 
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(energy_graph_batch,
+        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(graphs["graphs"][0],
                                                                                              N_basis_states,
                                                                                              key)
 
@@ -426,8 +431,8 @@ class PPO(Base):
         return log_dict, key
 
     @partial(jax.jit, static_argnums=(0,))
-    def _get_noise_distr_step(self, jraph_graph, X_prev, X_next, t_idx, node_gr_idx, T,  noise_rewards_arr):
-        noise_rewards_arr = self.calc_noise_step( jraph_graph, X_prev, X_next, t_idx, node_gr_idx, T, noise_rewards_arr)
+    def _get_noise_distr_step(self, jraph_graph, X_prev, X_next, t_idx, node_gr_idx, T,  noise_rewards_arr, key=None):
+        noise_rewards_arr = self.calc_noise_step( jraph_graph, X_prev, X_next, t_idx, node_gr_idx, T, noise_rewards_arr, key)
         return noise_rewards_arr
 
     @partial(jax.jit, static_argnums=(0,))

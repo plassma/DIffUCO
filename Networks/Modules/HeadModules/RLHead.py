@@ -8,14 +8,23 @@ import flax
 
 
 def get_graph_info(jraph_graph_list):
-    first_graph = jraph_graph_list["graphs"][0]
+    first_graph = jraph_graph_list["graphs"][0].graph
     nodes = first_graph.nodes
+    edges = first_graph.edges
     n_node = first_graph.n_node
+    n_edge = first_graph.n_edge
     n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]
     graph_idx = jnp.arange(n_graph)
     total_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-    node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_nodes)
-    return node_graph_idx, n_graph, n_node
+    total_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
+    node_graph_idx = jnp.repeat(
+        graph_idx, n_node, axis=0, total_repeat_length=total_nodes
+    )
+    edge_graph_idx = jnp.repeat(
+        graph_idx, n_edge, axis=0, total_repeat_length=total_edges
+    )
+    return edge_graph_idx, n_graph, n_edge
+    
 
 
 def global_graph_aggr(feature, node_graph_idx, n_graph):
