@@ -256,7 +256,7 @@ def run( flexible_config, overwrite = True):
 
     config = {
         "mode": "Diffusion",  # either Diffusion or MeanField
-        "dataset_name": "RB_iid_small",
+        "dataset_name": "RB_iid_100",
         "problem_name": "MIS",
         "jit": True,
         "wandb": True,
@@ -301,7 +301,7 @@ def run( flexible_config, overwrite = True):
         "graph_mode": "normal",
         "loss_alpha": 0.0,
         "MCMC_steps": 0,
-        "train_mode": "REINFORCE",
+        "train_mode": "PPO",
         "inner_loop_steps": 2,
         "minib_diff_steps": 3,
         "minib_basis_states": 10,
