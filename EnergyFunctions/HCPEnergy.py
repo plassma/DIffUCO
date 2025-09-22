@@ -28,7 +28,7 @@ class HCPEnergyClass(BaseEnergyClass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def calculate_Energy(self, H_graph, sample, node_gr_idx, A = 1., B = 1.2):
+    def calculate_Energy(self, meta_graph, sample, node_gr_idx, A = 1., B = 1.2):
         '''
         This method assumes that no edge dublicates are contained in the graph
         :param H_graph:
@@ -38,8 +38,15 @@ class HCPEnergyClass(BaseEnergyClass):
         :param B:
         :return:
         '''
+        H_graph = meta_graph.graph
         edge_gr_idx = node_gr_idx[H_graph.senders]
         n_graph = max(H_graph.n_node.shape)
+
+        sample = sample.squeeze()
+        #dummy_easy_energy = (sample * meta_graph.graph.globals["nth_of_group"] * (meta_graph.graph.globals["group_ids"] != 0).astype(jnp.int32))
+        #dummy_easy_energy = jax.ops.segment_sum(dummy_easy_energy, edge_gr_idx, n_graph)[..., None]
+        #return dummy_easy_energy, {"dummy_easy_energy": dummy_easy_energy}, dummy_easy_energy # todo: not even this very easy dummy energy can be optimized to 0 -> is NN/Head broken?´
+        
         n_node = max(H_graph.nodes.shape)
         node_types = H_graph.globals["node_types"].squeeze() # faulty shape: (1, N)
 
@@ -48,6 +55,20 @@ class HCPEnergyClass(BaseEnergyClass):
         senders = H_graph.senders.squeeze()
         receivers = H_graph.receivers.squeeze()
 
+
+        thing_index = jnp.where((node_types == THINGS), H_graph.globals["nth_of_type"].squeeze(), -1)[receivers]
+        cabinet_index = jnp.where((node_types == CABINETS), H_graph.globals["nth_of_type"].squeeze(), -1)[senders]
+        cabinets_x_things = jnp.zeros((meta_graph.meta["cabinets"] + 1, meta_graph.meta["things"] + 1))
+        cabinets_x_things = cabinets_x_things.at[cabinet_index, thing_index].add(sample)
+        cabinets_x_things = cabinets_x_things[:-1, :-1]
+
+        energy_cabinets_per_thing = jnp.array([jax.nn.relu(cabinets_x_things.sum(1) - 5).sum(),0])[:, None]
+
+        prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
+        prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
+
+        violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
+        order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
 
         owners_of_things_edges = jnp.where((node_types[senders] == THINGS) & (node_types[receivers] == PERSONS) & sample, receivers, 0) # faulty senders shape: (1, N)
         owners_of_things_nodes = jax.ops.segment_max(owners_of_things_edges, H_graph.senders, n_node)
@@ -65,9 +86,11 @@ class HCPEnergyClass(BaseEnergyClass):
         persons_of_things_nodes = jax.ops.segment_max(persons_of_things_edges, H_graph.receivers, n_node)
         persons_of_things_nodes = jnp.where(persons_of_things_nodes < 0, 0, persons_of_things_nodes)
 
-        energy = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None] + 0.0001
+        energy_ownerships = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None]
 
-        return energy, {"dict_energy": energy}, energy
+        energy = energy_ownerships + order_violations + energy_cabinets_per_thing
+
+        return energy, {"energy_ownerships": energy_ownerships, "order_violations": order_violations, "cabinets_per_thing": energy_cabinets_per_thing}, energy
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -76,6 +99,7 @@ class HCPEnergyClass(BaseEnergyClass):
         Calculate energy directly from logits without sampling.
         Replaces segment_max operations with weighted sums for continuous logits.
         '''
+        assert False
         H_graph = meta_graph.graph
         edge_gr_idx = node_gr_idx[H_graph.senders]
         n_graph = max(H_graph.n_node.shape)
@@ -164,6 +188,7 @@ class HCPEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_logits_clean_owners(self, meta_graph, logits, node_gr_idx, A = 1., B = 1.2):
+        assert False
         H_graph = meta_graph.graph
         n_graph = max(H_graph.n_node.shape)
         node_types = H_graph.globals["node_types"].squeeze()
@@ -211,10 +236,12 @@ class HCPEnergyClass(BaseEnergyClass):
 
     def calculate_relaxed_Energy(self, H_graph, bins, node_gr_idx, A = 1., B = 1.2):
         self.calculate_Energy(H_graph, bins, node_gr_idx, A = A, B = B)
+        assert False
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx, key=None, temp=1.): # logits shape: (626, 1)
         # solution_energy = self.calculate_Energy_logits(H_graph["graphs"][0], jnp.log(H_graph["graphs"][0].graph.globals["solution"] + 0.001), node_gr_idx)
+        assert False
         if logits.dtype == jnp.float32:
             return self.calculate_Energy_logits(H_graph["graphs"][0], logits[:, 0], node_gr_idx, temp=temp)
             n = 1000

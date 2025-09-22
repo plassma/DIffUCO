@@ -2,15 +2,16 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 import jax
-from .BaseTrainer import Base, repeat_along_nodes
+from .BaseTrainer import Base, repeat_along_edges
 import time
 import optax
 from utils import MovingAverages
 ### TODO use RL environments to make it possible to project solutions onto feasible solutions!
 
-vmap_repeat_along_nodes = jax.vmap(repeat_along_nodes, in_axes=(0, 0, 0))
+vmap_repeat_along_edges = jax.vmap(repeat_along_edges, in_axes=(0, 0, 0))
 @partial(jax.jit, static_argnums=())
 def select_time_idxs(graph, data_buffer_dict, rand_diff_steps, rand_states, key):
+    graph = graph.graph
     n_graphs = data_buffer_dict["policies"].shape[-2]
     n_nodes = data_buffer_dict["states"].shape[-3]
     n_devices = data_buffer_dict["policies"].shape[0]
@@ -28,7 +29,7 @@ def select_time_idxs(graph, data_buffer_dict, rand_diff_steps, rand_states, key)
     rand_diff_steps = jnp.transpose(rand_diff_steps, (0, -1, -3, -2))
     rand_states = jnp.transpose(rand_states, (0, 2,1))
 
-    rand_diff_steps_per_node = vmap_repeat_along_nodes(graph.nodes, graph.n_node, jnp.swapaxes(rand_diff_steps, 1, 2))
+    rand_diff_steps_per_node = vmap_repeat_along_edges(graph.edges, graph.n_edge, jnp.swapaxes(rand_diff_steps, 1, 2))
     rand_diff_steps_per_node = jnp.swapaxes(rand_diff_steps_per_node, 1, 2)
 
     out_dict = {}
@@ -98,7 +99,7 @@ class PPO(Base):
 
     #@partial(jax.jit, static_argnums=(0,))
     def _init_index_arrays(self):
-        self.n_graphs = int(self.config["batch_size"]/self.n_devices) + 1
+        self.n_graphs = 2 #int(self.config["batch_size"]/self.n_devices) + 1 todo plassma: hardcoded for now
         diff_step_arr = jnp.arange(0,self.n_diffusion_steps)
         Nb_arr = jnp.repeat(diff_step_arr[None, ...], self.N_basis_states, axis=0)
         Gb_Nb_arr = jnp.repeat(Nb_arr[None, ...], self.n_graphs, axis=0) #Nb_arr#
@@ -144,7 +145,7 @@ class PPO(Base):
         ### TODO log reverse KL here?
         return loss, (log_dict, _)
 
-    def train_step(self, params, opt_state, graphs, energy_graph_batch, T, key):
+    def train_step(self, params, opt_state, graphs, energy_graph_batch, T, key, epoch_temp=1.0):
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
 
@@ -306,7 +307,7 @@ class PPO(Base):
 
         entropy_step = self._get_entropy_step(energy_graph_batch, state_log_probs, node_gr_idx)
         ### TODO is this still correct for annealed noise distr? Anneled reward should be given to step i-1?!
-        scan_dict["noise_rewards"] = self._get_noise_distr_step(energy_graph_batch, X_prev, X_next, model_step_idx, node_gr_idx, T, scan_dict["noise_rewards"], batched_key)
+        scan_dict["noise_rewards"] = self._get_noise_distr_step(graphs["graphs"][0], X_prev, X_next, model_step_idx, node_gr_idx, T, scan_dict["noise_rewards"], batched_key)
 
         X_prev = X_next
         scan_dict["Xs_over_different_steps"] = scan_dict["Xs_over_different_steps"].at[i + 1].set(X_next)
@@ -368,7 +369,8 @@ class PPO(Base):
         spin_logits_next = out_dict_list["spin_logits_next"][-1]
 
         X_next = scan_dict["X_prev"]#
-        energy_step, Hb, best_X_0, key = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, key)
+        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(graphs["graphs"][0], X_next, node_gr_idx, key)
+        energy_dict = {k: v[:-1] for k, v in energy_dict.items()}
         energy_reward = -energy_step
 
         noise_rewards = scan_dict["noise_rewards"]
@@ -421,7 +423,7 @@ class PPO(Base):
                                                   "y_values": jnp.mean(jnp.mean(noise_rewards[:, :-1], axis=-1),
                                                                        axis=-1)}
                                 },
-                    "energies": {"HA": graph_energies, "Hb": Hb},
+                    "energies": {"HA": graph_energies, "Hb": Hb} | energy_dict,
                     "log_p_0": spin_logits_next,
                     "X_0": X_0,
                     "best_X_0": best_X_0,
@@ -446,14 +448,18 @@ class PPO(Base):
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_entropy_step_relaxed(self, jraph_graph, spin_logits, node_gr_idx):
-        log_probs_down = spin_logits[..., 0]
-        log_probs_up = spin_logits[..., 1]
-        probs_up = jnp.exp(log_probs_up)
-        probs_down = jnp.exp(log_probs_down)
+        if spin_logits.shape[-1] == 2:
+            log_probs_down = spin_logits[..., 0]
+            log_probs_up = spin_logits[..., 1]
+            probs_up = jnp.exp(log_probs_up)
+            probs_down = jnp.exp(log_probs_down)
 
-        entropy_term_1 = -probs_up * log_probs_up
-        entropy_term_2 = -probs_down * log_probs_down
-        entropy_term_per_node = entropy_term_1 + entropy_term_2
+            entropy_term_1 = -probs_up * log_probs_up
+            entropy_term_2 = -probs_down * log_probs_down
+            entropy_term_per_node = entropy_term_1 + entropy_term_2
+        else:
+            entropy_term_per_group = -jax.ops.segment_sum(spin_logits * jnp.exp(spin_logits), jraph_graph.globals["group_ids"], num_segments=66)
+            entropy_term_per_node = entropy_term_per_group[jraph_graph.globals["group_ids"]] / jraph_graph.globals["group_counts"][..., None, None]
 
         n_graph = jraph_graph.n_node.shape[0]
         relaxed_entropies_per_graph = jax.ops.segment_sum(jnp.sum(entropy_term_per_node, axis=-1, keepdims=True),
@@ -469,11 +475,12 @@ class PPO(Base):
             best_X_0, relaxed_energies_per_graph, Hb_per_graph = self.vmapped_energy_CE(jraph_graph, X_0, node_gr_idx)
             Hb = jnp.mean(jnp.abs(Hb_per_graph[:-1]))
         else:
-            relaxed_energies_per_graph, _, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx)
+            #solution_energy = self.vmapped_relaxed_energy(jraph_graph, jraph_graph.graph.globals["solution"][:, None, None], node_gr_idx)
+            relaxed_energies_per_graph, energy_dict, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx)
             best_X_0 = X_0
             Hb = jnp.mean(jnp.abs(Hb_per_graph)[:-1])
 
-        return relaxed_energies_per_graph[...,0], Hb, best_X_0, key
+        return relaxed_energies_per_graph[...,0], Hb, best_X_0, key, energy_dict
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_energy_reward_relaxed(self, jraph_graph, spin_logits, node_gr_idx):

@@ -681,7 +681,7 @@ class TrainMeanField:
 				print("batchsize is", len(gt_normed_energies))
 
 				step1 = time.time()
-				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict, epoch_temp= max(1 - epoch * 4/self.epochs, 0.001))
+				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict, epoch_temp=1.0) # epoch_temp=max(1 - epoch * 4/self.epochs, 0.001)
 				step3 = time.time()
 
 				if("metrics" in log_dict.keys()):

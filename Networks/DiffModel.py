@@ -14,9 +14,9 @@ def gumbel_keys(key, shape):
     return -jnp.log(-jnp.log(u))
 
 
-def groupwise_sample(key, logits, group_ids, num_segments=66, temp=0.1):
+def groupwise_sample(key, logits, group_ids, num_segments=66, temp=1.0):
     """Groupwise sampling from logits via the Gumbel-max trick.
-    Assumes logits are already groupwise log_softmax-normalized.
+    Now handles raw logits and performs groupwise log_softmax normalization.
     Adds temperature scaling to logits before sampling.
     """
     if len(logits.shape) == 2:
@@ -24,17 +24,27 @@ def groupwise_sample(key, logits, group_ids, num_segments=66, temp=0.1):
     if key is None:
         key = jax.random.PRNGKey(0)
 
-    gumbel_noise = gumbel_keys(key, logits.shape)
-    noisy_logits = logits / temp + gumbel_noise
+    # Normalize logits within each group using log_softmax
+    max_per_group = jax.ops.segment_max(logits[..., 0], group_ids, num_segments=num_segments)
+    shifted_logits = logits[..., 0] - max_per_group[group_ids]
+    exp_shifted = jnp.exp(shifted_logits)
+    sum_exp_per_group = jax.ops.segment_sum(exp_shifted, group_ids, num_segments=num_segments)
+    log_probs = shifted_logits - jnp.log(sum_exp_per_group[group_ids])
+    log_probs = log_probs[..., None]
 
-    max_per_group = jax.ops.segment_max(noisy_logits, group_ids, num_segments=num_segments)
-    is_max = (noisy_logits == max_per_group[group_ids])
-    is_max = jnp.where((group_ids == 0)[..., None, None], 1, is_max)
+    # Add Gumbel noise and temperature scaling
+    gumbel_noise = gumbel_keys(key, logits.shape)
+    noisy_logits = log_probs / temp + gumbel_noise
+
+    # Find argmax within each group
+    max_per_group = jax.ops.segment_max(noisy_logits[..., 0], group_ids, num_segments=num_segments)
+    is_max = (noisy_logits[..., 0] == max_per_group[group_ids])
+    is_max = jnp.where((group_ids[:, None, None] == 0), 1, is_max[..., None])
     return is_max.astype(jnp.int32)
 
 class DummyEdgeEmbedder(nn.Module):
     def setup(self):
-        layers = [nn.Dense(features=626), jax.nn.relu, lambda x: x.T, nn.Dense(features=64), jax.nn.relu, lambda x: x.T, nn.Dense(features=626), jax.nn.relu, lambda x: x.T]
+        layers = [nn.Dense(features=626), jax.nn.relu, lambda x: x.T, nn.Dense(features=64), jax.nn.relu, lambda x: x.T, nn.Dense(features=626), lambda x: x.T]
         self.mlp = nn.Sequential(layers)
 
 
@@ -355,10 +365,19 @@ class DiffModel(nn.Module):
             X_next = groupwise_sample(subkey, spin_logits, graph.graph.globals["group_ids"], graph.meta["n_groups"])
             # X_next = X_next[:, 0, 0]
 
-        one_hot_state = jax.nn.one_hot(X_next[..., 0], num_classes=self.n_bernoulli_features)
-
-        # X_next = jnp.expand_dims(X_next, axis = -1)
-        spin_log_probs = jnp.sum(spin_logits * X_next, axis=-1)
+        # For categorical variables, X_next is one-hot encoded from groupwise_sample
+        one_hot_state = X_next[..., 0]  # X_next is one-hot from groupwise_sample
+        
+        # Calculate log probabilities by selecting the logits for the chosen actions
+        # We need to compute log_softmax of the original logits and then select
+        max_per_group = jax.ops.segment_max(spin_logits[..., 0], graph.graph.globals["group_ids"], num_segments=graph.meta["n_groups"])
+        shifted_logits = spin_logits[..., 0] - max_per_group[graph.graph.globals["group_ids"]]
+        exp_shifted = jnp.exp(shifted_logits)
+        sum_exp_per_group = jax.ops.segment_sum(exp_shifted, graph.graph.globals["group_ids"], num_segments=graph.meta["n_groups"])
+        log_probs = shifted_logits - jnp.log(sum_exp_per_group[graph.graph.globals["group_ids"]])
+        
+        # Select the log probabilities for the chosen actions
+        spin_log_probs = jnp.sum(log_probs[..., None] * X_next, axis=-1)
 
         # print("Diff model model samples", X_next.shape, one_hot_state.shape)
         return X_next[..., 0], spin_log_probs, key  # [N, 1], [N, 1]
@@ -374,12 +393,21 @@ class DiffModel(nn.Module):
         spin_logits = out_dict["spin_logits"]
         node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
 
-        one_hot_state = jax.nn.one_hot(X_next, num_classes=self.n_bernoulli_features)
-        # X_next = jnp.expand_dims(X_next, axis = -1)
-        spin_log_probs = jnp.sum(spin_logits * X_next, axis=-1)
+        # For categorical variables, X_next should be one-hot encoded
+        one_hot_state = X_next  # X_next should already be one-hot
+        
+        # Calculate log probabilities the same way as in sample_from_model
+        max_per_group = jax.ops.segment_max(spin_logits[..., 0], node_graph_idx, n_graph)
+        shifted_logits = spin_logits[..., 0] - max_per_group[node_graph_idx]
+        exp_shifted = jnp.exp(shifted_logits)
+        sum_exp_per_group = jax.ops.segment_sum(exp_shifted, node_graph_idx, n_graph)
+        log_probs = shifted_logits - jnp.log(sum_exp_per_group[node_graph_idx])
+        
+        # Select the log probabilities for the chosen actions
+        spin_log_probs = jnp.sum(log_probs[..., None] * X_next, axis=-1)
         # print(X_next.shape, X_next, jnp.exp(spin_log_probs))
         X_next_log_prob = self.__get_log_prob(
-            spin_log_probs[..., 0], node_graph_idx, n_graph
+            spin_log_probs, node_graph_idx, n_graph
         )
 
         # graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)/(n_node[:,None]*self.n_bernoulli_features))[:-1]))

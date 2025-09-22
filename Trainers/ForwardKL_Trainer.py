@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from functools import partial
 import jax
-from .BaseTrainer import Base, repeat_along_nodes
+from .BaseTrainer import Base, repeat_along_edges
 import numpy as np
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -9,7 +9,7 @@ import optax
 import time
 from scipy.special import softmax as np_softmax
 
-vmap_repeat_along_nodes = jax.vmap(repeat_along_nodes, in_axes=(0, 0, 0))
+vmap_repeat_along_nodes = jax.vmap(repeat_along_edges, in_axes=(0, 0, 0))
 @partial(jax.jit, static_argnums=())
 def select_time_idxs(graphs, data_buffer_dict, split_diff_arr, key):
     max_diff_steps = data_buffer_dict["log_p_0_T"].shape[1]

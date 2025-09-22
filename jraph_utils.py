@@ -352,7 +352,14 @@ def pmap_graph_list_better_meta(jraph_graph_list, dataset_statistics_dict, pad_f
         nth_of_type[i] = node_type_counts[gid]
         node_type_counts[gid] += 1
 
+    group_type_counts = defaultdict(int)
+    nth_of_group = np.zeros_like(device_batched_graphs_with_meta.graph.globals["group_ids"][0])
+    for i, gid in enumerate(device_batched_graphs_with_meta.graph.globals["group_ids"][0]):
+        nth_of_group[i] = group_type_counts[gid]
+        group_type_counts[gid] += 1
+
     device_batched_graphs_with_meta.graph.globals["nth_of_type"] = nth_of_type[None, :]
+    device_batched_graphs_with_meta.graph.globals["nth_of_group"] = nth_of_group[None, :]
     device_batched_graphs_with_meta.graph.globals["group_ids"][0, -1] = -1
     device_batched_graphs_with_meta.graph.globals["group_ids"][0] = np.unique(device_batched_graphs_with_meta.graph.globals["group_ids"], return_inverse=True)[1] # debloat group ids to [0-N]
     device_batched_graphs_with_meta.graph.globals["group_counts"][0][device_batched_graphs_with_meta.graph.globals["group_ids"][0] == 0] = 1 # plassma: fix logprob at constant edges

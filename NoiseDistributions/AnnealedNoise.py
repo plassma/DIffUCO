@@ -65,7 +65,7 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
         Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy(jraph_graph, X_prev, node_gr_idx, key, epoch_temp)
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         noise_step_value = gamma_t*Noise_Energy_per_graph
-        noise_rewards_arr = noise_rewards_arr.at[reward_idx].set(noise_rewards_arr[reward_idx] - noise_step_value)
+        noise_rewards_arr = noise_rewards_arr.at[reward_idx].set(noise_rewards_arr[reward_idx] - noise_step_value) # [1, 31, 20] [1, 31, 20] [31, 20]
         return noise_rewards_arr
 
 

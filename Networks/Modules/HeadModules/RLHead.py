@@ -3,6 +3,7 @@ import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 from Networks.Modules.MLPModules.MLPs import ProbMLP, ValueMLP
+from Networks.Modules.HeadModules.NormalHead import grouped_log_softmax
 from functools import partial
 import flax
 
@@ -55,8 +56,12 @@ class RLHeadModule_agg_before(nn.Module):
 
         node_graph_idx, n_graph, n_node = get_graph_info(jraph_graph_list)
         Value_embeddings = global_graph_aggr(x, node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
-        Values = self.ValueMLP(Value_embeddings)[..., 0, 0]
-        out_dict["spin_logits"] = spin_logits
+        Values = self.ValueMLP(Value_embeddings)[..., 0, 0] # todo plassma: check values
+
+        # For categorical variables, we need to output raw logits, not log probabilities
+        # The groupwise_sample function will handle the normalization
+        raw_logits = jnp.where((jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0)[..., None, None], 0, spin_logits)
+        out_dict["spin_logits"] = raw_logits
         out_dict["Values"] = Values
         return out_dict
 

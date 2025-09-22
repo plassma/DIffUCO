@@ -927,9 +927,9 @@ class Base(ABC):
         return 1 / np.sinh(x, dtype=np.float64)
 
 @partial(jax.jit, static_argnums=())
-def repeat_along_nodes(nodes, n_node, target_per_graph):
-    total_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-    target_per_node = jnp.repeat(target_per_graph, n_node, axis=0,
+def repeat_along_edges(edges, n_edge, target_per_graph):
+    total_nodes = jax.tree_util.tree_leaves(edges)[0].shape[0]
+    target_per_node = jnp.repeat(target_per_graph, n_edge, axis=0,
                                           total_repeat_length=total_nodes)
 
     return target_per_node
