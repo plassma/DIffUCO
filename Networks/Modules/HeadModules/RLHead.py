@@ -57,11 +57,9 @@ class RLHeadModule_agg_before(nn.Module):
         node_graph_idx, n_graph, n_node = get_graph_info(jraph_graph_list)
         Value_embeddings = global_graph_aggr(x, node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
         Values = self.ValueMLP(Value_embeddings)[..., 0, 0] # todo plassma: check values
-
-        # For categorical variables, we need to output raw logits, not log probabilities
-        # The groupwise_sample function will handle the normalization
-        raw_logits = jnp.where((jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0)[..., None, None], 0, spin_logits)
-        out_dict["spin_logits"] = raw_logits
+        log_probs = grouped_log_softmax(spin_logits, jraph_graph_list, jraph_graph_list["graphs"][0].meta["n_groups"])
+        log_probs = jnp.where(jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0, 0, log_probs[..., 0])[..., None]
+        out_dict["spin_logits"] = log_probs
         out_dict["Values"] = Values
         return out_dict
 
