@@ -12,6 +12,7 @@ from scipy.special import softmax as np_softmax
 vmap_repeat_along_nodes = jax.vmap(repeat_along_edges, in_axes=(0, 0, 0))
 @partial(jax.jit, static_argnums=())
 def select_time_idxs(graphs, data_buffer_dict, split_diff_arr, key):
+    graphs = graphs.graph
     max_diff_steps = data_buffer_dict["log_p_0_T"].shape[1]
     n_devices = data_buffer_dict["log_p_0_T"].shape[0]
     diff_idx_mat = jnp.transpose(split_diff_arr, (0,3, 1, 2))
@@ -26,7 +27,7 @@ def select_time_idxs(graphs, data_buffer_dict, split_diff_arr, key):
     log_p_0_T = data_buffer_dict["log_p_0_T"]  # device batch, diff_step_batch, graph batch, basisi state batch
     log_q_0_T = data_buffer_dict["log_q_0_T"]
 
-    diff_idx_mat_per_node = vmap_repeat_along_nodes(graphs.nodes, graphs.n_node, jnp.swapaxes(diff_idx_mat, 1, 2))
+    diff_idx_mat_per_node = vmap_repeat_along_nodes(graphs.edges, graphs.n_edge, jnp.swapaxes(diff_idx_mat, 1, 2))
     diff_idx_mat_per_node = jnp.swapaxes(diff_idx_mat_per_node, 1, 2)[..., None]
 
     X_prev = data_buffer_dict["bin_sequence"][device_idx_mat, diff_idx_mat_per_node, node_idx_mat, state_idx_mat, ones_idx_mat]
@@ -89,7 +90,7 @@ class ForwardKL(Base):
 
     #@partial(jax.jit, static_argnums=(0,))
     def _init_index_arrays(self):
-        self.n_graphs = int(self.config["batch_size"]/self.n_devices) + 1
+        self.n_graphs = 2#int(self.config["batch_size"]/self.n_devices) + 1
         diff_step_arr = jnp.arange(0,self.n_diffusion_steps)
         #Nb_arr = jnp.repeat(diff_step_arr[None, ...], self.N_basis_states, axis=0)
         Nb_diff_step_arr = jnp.repeat(diff_step_arr[None, ...], self.N_basis_states, axis = 0)
@@ -354,7 +355,7 @@ class ForwardKL(Base):
         energy_graph_batch = scan_dict["energy_graph_batch"]
 
         model_step_idx = jnp.array([i / self.eval_step_factor], dtype=jnp.int16)
-        model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1), dtype=jnp.int16)
+        model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.edges.shape[0], 1), dtype=jnp.int16)
 
         key, subkey = jax.random.split(scan_dict["key"])
         scan_dict["key"] = key
@@ -367,8 +368,11 @@ class ForwardKL(Base):
         X_next = out_dict["X_next"]
         state_log_probs = out_dict["state_log_probs"]
 
+        key, subkey = jax.random.split(key)
+        scan_dict["key"] = key
+
         log_q_t = state_log_probs
-        log_p_t = self.NoiseDistrClass.get_log_p_T_0(energy_graph_batch, X_prev, X_next, model_step_idx, T)
+        log_p_t = self.NoiseDistrClass.get_log_p_T_0(graphs, X_prev, X_next, model_step_idx, T, subkey)
 
         scan_dict["log_q_0_T"] = scan_dict["log_q_0_T"].at[i + 1].set(log_q_t)
         scan_dict["log_p_0_T"] = scan_dict["log_p_0_T"].at[i].set(log_p_t)
@@ -405,7 +409,7 @@ class ForwardKL(Base):
             N_basis_states = self.N_test_basis_states
 
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(energy_graph_batch,
+        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(graphs["graphs"][0],
                                                                                              N_basis_states,
                                                                                              key)
 
@@ -442,7 +446,8 @@ class ForwardKL(Base):
         rand_node_features_diff_steps = scan_dict["rand_node_features_diff_steps"]
         prob_over_diff_steps = scan_dict["prob_over_diff_steps"]
 
-        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energies, energy_dict, _ = self.vmapped_relaxed_energy(graphs["graphs"][0], X_0, node_gr_idx)
+        energy_dict = {k: v[:-1] for k, v in energy_dict.items()}
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[-1].set(log_p_0)
 
@@ -462,7 +467,7 @@ class ForwardKL(Base):
         log_dict = {"Losses": {"forward_KL": forward_KL, "reverse_KL": reverse_KL},
                     "metrics": {"energies": metric_energies, "entropies": 0., "spin_log_probs": spin_log_probs,
                                 "free_energies": 0., "graph_mean_energies": metric_energies},
-                    "energies": {"HA": metric_energies},
+                    "energies": {"HA": metric_energies} | energy_dict,
                     "figures": {"prob_over_diff_steps": {"x_values": x_axis, "y_values": prob_over_diff_steps},
                                 # "sum_log_p": {"x_values": jnp.arange(0, sum_log_p[0].shape[-1]),
                                 #               "y_values": sum_log_p[0]},

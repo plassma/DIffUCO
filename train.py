@@ -626,7 +626,7 @@ class TrainMeanField:
 		batching_time = step2 - step1
 
 		self.params, self.opt_state, loss, (log_dict, energy_graph_batch, self.key) = self.TrainerClass.train_step(self.params, self.opt_state, graph_batch,
-																							  energy_graph_batch, self.T, self.key, epoch_temp=epoch_temp)
+																							  energy_graph_batch, self.T, self.key)
 		
 		if plot:
 			node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].graph.n_node.shape[1]), graph_batch["graphs"][0].graph.n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].graph.n_node.sum())
@@ -681,7 +681,7 @@ class TrainMeanField:
 				print("batchsize is", len(gt_normed_energies))
 
 				step1 = time.time()
-				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict, epoch_temp=1.0) # epoch_temp=max(1 - epoch * 4/self.epochs, 0.001)
+				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict) # epoch_temp=max(1 - epoch * 4/self.epochs, 0.001)
 				step3 = time.time()
 
 				if("metrics" in log_dict.keys()):

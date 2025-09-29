@@ -138,7 +138,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": None,"n_random_node_features": 16, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0]}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "mode_node_edge": "edge", "N_anneal": args.N_anneal[0], "load_wandb_id": None,"n_random_node_features": 16, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -271,7 +271,7 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 1e-3,
+        "lr": 8e-5,
         "batch_size": 30, # H
         "N_basis_states": 100, # n_s
 
@@ -280,6 +280,7 @@ def run( flexible_config, overwrite = True):
         "relaxed": False,
 
         "T_max": 0.01,
+        "T_target": 0.0,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
@@ -322,7 +323,6 @@ def run( flexible_config, overwrite = True):
         "n_sampling_rounds": 5,
         "n_test_basis_states": 20,
         "bfloat16": False,
-        "T_target": 0.,
         "AnnealSchedule": "linear",
         "time_encoding": "one_hot",
         "lr_schedule": "cosine",

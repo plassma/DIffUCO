@@ -14,7 +14,7 @@ def gumbel_keys(key, shape):
     return -jnp.log(-jnp.log(u))
 
 
-def groupwise_sample(key, logits, group_ids, num_segments=66, temp=1.0):
+def groupwise_sample(key, logits, group_ids, num_segments=66, temp=1.):
     """Groupwise sampling from logits via the Gumbel-max trick.
     Assumes logits are already groupwise log_softmax-normalized.
     Adds temperature scaling to logits before sampling.
@@ -271,7 +271,7 @@ class DiffModel(nn.Module):
             )
         )
 
-        out_dict["pred_entropy"] = - spin_logits * jnp.exp(spin_logits)
+        #out_dict["pred_entropy"] = - spin_logits * jnp.exp(spin_logits)
         out_dict["X_next"] = X_next  # [3151, 1]
         out_dict["spin_log_probs"] = spin_log_probs  # [3151, 1]
         out_dict["state_log_probs"] = self.__get_log_prob(

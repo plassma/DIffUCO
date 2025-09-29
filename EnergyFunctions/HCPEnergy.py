@@ -64,11 +64,16 @@ class HCPEnergyClass(BaseEnergyClass):
 
         energy_cabinets_per_thing = jnp.array([jax.nn.relu(cabinets_x_things.sum(1) - 5).sum(),0])[:, None]
 
-        prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
-        prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
 
-        violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
-        order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
+        #order_violations old:
+        #prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
+        #prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
+        #violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
+        #order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
+
+        thing_indices = jnp.arange(meta_graph.meta["things"])[None,:].repeat(meta_graph.meta["cabinets"], axis=0) / meta_graph.meta["things"]
+        cabinet_indices = jnp.arange(meta_graph.meta["cabinets"])[:,None].repeat(meta_graph.meta["things"], axis=1) / meta_graph.meta["cabinets"]
+        
 
         owners_of_things_edges = jnp.where((node_types[senders] == THINGS) & (node_types[receivers] == PERSONS) & sample, receivers, 0) # faulty senders shape: (1, N)
         owners_of_things_nodes = jax.ops.segment_max(owners_of_things_edges, H_graph.senders, n_node)
@@ -88,7 +93,7 @@ class HCPEnergyClass(BaseEnergyClass):
 
         energy_ownerships = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None]
 
-        energy = energy_ownerships + order_violations + energy_cabinets_per_thing
+        energy = energy_ownerships + order_violations * 0 + energy_cabinets_per_thing # todo: can order violations be formulated more monotonically?
 
         return energy, {"energy_ownerships": energy_ownerships, "order_violations": order_violations, "cabinets_per_thing": energy_cabinets_per_thing}, energy
 
@@ -100,17 +105,5 @@ class HCPEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx, key=None, temp=1.): # logits shape: (626, 1)
-        # solution_energy = self.calculate_Energy_logits(H_graph["graphs"][0], jnp.log(H_graph["graphs"][0].graph.globals["solution"] + 0.001), node_gr_idx)
-        assert False
-        if logits.dtype == jnp.float32:
-            return self.calculate_Energy_logits(H_graph["graphs"][0], logits[:, 0], node_gr_idx, temp=temp)
-            n = 1000
-            n_logits = jnp.repeat(logits, n, axis=1)
-            samples = groupwise_sample(key, n_logits[..., None], H_graph["graphs"][0].graph.globals["group_ids"].squeeze(), H_graph["graphs"][0].meta["n_groups"])
-            disc_energy = self.vmapped_argmax_energy(H_graph["graphs"][0].graph, samples[..., 0], node_gr_idx)
-            #cont_energy = self.calculate_Energy_logits(H_graph["graphs"][0], logits[:, 0], node_gr_idx, temp=temp)
-            #cont_energy = (cont_energy[0], cont_energy[1] | {"discrete": disc_energy[0].mean(0)}, cont_energy[2])
-            return (disc_energy[0].mean(0), {k: v.mean(0) for k, v in disc_energy[1].items()}, disc_energy[2].mean(0))
-        else:
-            return self.calculate_Energy_logits(H_graph["graphs"][0], jnp.log(logits[:, 0] + 0.001), node_gr_idx, temp=temp)
+       return self.calculate_Energy(H_graph["graphs"][0], logits, node_gr_idx)
         
