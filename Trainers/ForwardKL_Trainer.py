@@ -161,7 +161,7 @@ class ForwardKL(Base):
     def _update_policy(self, params, opt_state, graphs, out_dict, key):
 
         ### TODO add figures that visualize losses over inner loop steps
-        log_dict = {"Losses": {"forward_KL": []}, "time": {"grad_step": [], "dataloading_time": []}}
+        log_dict = out_dict | {"Losses": {"forward_KL": []}, "time": {"grad_step": [], "dataloading_time": []}}
         for i in range(self.inner_loop_steps):
             start_dataloading_time = time.time()
             perm_diff_array, key = self._shuffle_index_array(key)
@@ -300,7 +300,8 @@ class ForwardKL(Base):
             prob_over_diff_steps = prob_over_diff_steps.at[i + 1].set(average_probs)
 
         X_0 = X_next
-        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energies, energy_dict, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energy_dict = {k: v[:-1] for k, v in energy_dict.items()}
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[i+1].set(log_p_0)
 
@@ -321,7 +322,7 @@ class ForwardKL(Base):
         log_dict = {"Losses": {"forward_KL": forward_KL},
                     "metrics": {"energies": metric_energies, "entropies": 0., "spin_log_probs": spin_log_probs,
                                 "free_energies": 0., "graph_mean_energies": metric_energies},
-                    "energies": {"HA": metric_energies},
+                    "energies": {"HA": metric_energies} | energy_dict,
                     "figures": {"prob_over_diff_steps": {"x_values": x_axis, "y_values": prob_over_diff_steps},
                                 "sum_log_p": {"x_values": jnp.arange(0, sum_log_p[0].shape[-1]), "y_values": sum_log_p[0]},
                                 "sum_log_q": {"x_values": jnp.arange(0, sum_log_q[0].shape[-1]), "y_values": sum_log_q[0]},

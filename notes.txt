@@ -3,3 +3,5 @@
 order constraint loss product difference - interview chatgpt
 basisstates
 temperature
+
+faulty shape: (1, 1, 626)

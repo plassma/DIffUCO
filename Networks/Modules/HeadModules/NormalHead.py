@@ -8,6 +8,7 @@ import flax  # Remove unused import
 from typing import Any
 
 # --- grouped_log_softmax implementation ---
+# todo: delete this
 def grouped_log_softmax(logits: jnp.ndarray, jraph_graph_list: dict, n_groups: int = 66) -> jnp.ndarray: # todo plassma: n_groups is hardcoded for now
     group_ids = jraph_graph_list["graphs"][0].graph.globals["group_ids"]
     # num_segments = jraph_graph_list["n_groups"][0]#jnp.max(group_ids) + 1

@@ -43,8 +43,11 @@ class HCPEnergyClass(BaseEnergyClass):
         n_graph = max(H_graph.n_node.shape)
 
         sample = sample.squeeze()
-        dummy_easy_energy = (sample * meta_graph.graph.globals["nth_of_group"] * (meta_graph.graph.globals["group_ids"] != 0).astype(jnp.int32))
-        dummy_easy_energy = jax.ops.segment_sum(dummy_easy_energy, edge_gr_idx, n_graph)[..., None]
+
+        #solution_hamming = jnp.array([jnp.sum(sample != H_graph.globals["solution"]), 0])[:, None]
+        #return solution_hamming, {"solution_hamming": solution_hamming}, solution_hamming
+        #dummy_easy_energy = (sample * meta_graph.graph.globals["nth_of_group"] * (meta_graph.graph.globals["group_ids"] != 0).astype(jnp.int32))
+        #dummy_easy_energy = jax.ops.segment_sum(dummy_easy_energy, edge_gr_idx, n_graph)[..., None]
         #return dummy_easy_energy, {"dummy_easy_energy": dummy_easy_energy}, dummy_easy_energy # todo: not even this very easy dummy energy can be optimized to 0 -> is NN/Head broken?´
         
         n_node = max(H_graph.nodes.shape)
@@ -66,13 +69,13 @@ class HCPEnergyClass(BaseEnergyClass):
 
 
         #order_violations old:
-        #prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
-        #prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
-        #violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
-        #order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
+        prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
+        prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
+        violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
+        order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
 
-        thing_indices = jnp.arange(meta_graph.meta["things"])[None,:].repeat(meta_graph.meta["cabinets"], axis=0) / meta_graph.meta["things"]
-        cabinet_indices = jnp.arange(meta_graph.meta["cabinets"])[:,None].repeat(meta_graph.meta["things"], axis=1) / meta_graph.meta["cabinets"]
+        #thing_indices = jnp.arange(meta_graph.meta["things"])[None,:].repeat(meta_graph.meta["cabinets"], axis=0) / meta_graph.meta["things"]
+        #cabinet_indices = jnp.arange(meta_graph.meta["cabinets"])[:,None].repeat(meta_graph.meta["things"], axis=1) / meta_graph.meta["cabinets"]
         
 
         owners_of_things_edges = jnp.where((node_types[senders] == THINGS) & (node_types[receivers] == PERSONS) & sample, receivers, 0) # faulty senders shape: (1, N)
@@ -93,7 +96,7 @@ class HCPEnergyClass(BaseEnergyClass):
 
         energy_ownerships = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None]
 
-        energy = energy_ownerships + order_violations * 0 + energy_cabinets_per_thing # todo: can order violations be formulated more monotonically?
+        energy = energy_ownerships + order_violations + energy_cabinets_per_thing # todo: can order violations be formulated more monotonically?
 
         return energy, {"energy_ownerships": energy_ownerships, "order_violations": order_violations, "cabinets_per_thing": energy_cabinets_per_thing}, energy
 

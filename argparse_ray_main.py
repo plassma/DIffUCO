@@ -129,7 +129,7 @@ def meanfield_run():
         pass
 
     #run_PPO_experiment_func = lambda flex_conf: run_PPO_experiment_hydra()
-    np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True, precision=3)
+    np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True,)# precision=4
     if(local_mode):
         import jax
         #jax.config.update("jax_debug_nans", True)
@@ -271,7 +271,7 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 8e-5,
+        "lr": 1e-4,
         "batch_size": 30, # H
         "N_basis_states": 100, # n_s
 
@@ -279,8 +279,8 @@ def run( flexible_config, overwrite = True):
         "n_random_node_features": 5,
         "relaxed": False,
 
-        "T_max": 0.01,
-        "T_target": 0.0,
+        "T_max": 0.03,
+        "T_target": 0.003,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,

@@ -8,18 +8,6 @@ from functools import partial
 from Networks.Modules import get_GNN_model
 
 
-def grouped_log_softmax(logits: jnp.ndarray, jraph_graph_list: dict, n_groups: int = 66) -> jnp.ndarray: # todo plassma: n_groups is hardcoded for now
-    group_ids = jraph_graph_list["graphs"][0].graph.globals["group_ids"]
-    # num_segments = jraph_graph_list["n_groups"][0]#jnp.max(group_ids) + 1
-    max_per_group = jax.ops.segment_max(logits[:, :, 0].squeeze(-1), group_ids, n_groups)
-    shifted = logits[:, :, 0].squeeze(-1) - max_per_group[group_ids]
-    exp_shifted = jnp.exp(shifted)
-    sum_exp_per_group = jax.ops.segment_sum(exp_shifted, group_ids, n_groups)
-    logsumexp_per_group = jnp.log(sum_exp_per_group)
-    log_probs = (shifted - logsumexp_per_group[group_ids])[..., None]
-    log_probs = jnp.where(jraph_graph_list["graphs"][0].graph.globals["group_ids"] == 0, 0, log_probs[..., 0])[..., None]
-    return log_probs
-
 def gumbel_keys(key, shape):
     """Sample Gumbel noise."""
     u = jax.random.uniform(key, shape=shape, minval=1e-6, maxval=1.0)
@@ -46,7 +34,7 @@ def groupwise_sample(key, logits, group_ids, num_segments=66, temp=1.):
 
 class DummyEdgeMLP(nn.Module):
     def setup(self):
-        layers = [nn.Dense(features=128), jax.nn.relu, nn.Dense(features=64,), jax.nn.relu, nn.Dense(features=64,), jax.nn.relu, nn.Dense(features=626)]
+        layers = [nn.Dense(features=626), jax.nn.relu, lambda x: x.T, nn.Dense(features=64), jax.nn.relu, lambda x: x.T, nn.Dense(features=626), lambda x: x.T]
         self.mlp = nn.Sequential(layers)
 
 
@@ -143,8 +131,8 @@ class DiffModel(nn.Module):
             get_sinusoidal_positional_encoding, in_axes=(0, None, None)
         )
         ### TODO random node feature key is different during eval and sample, force them to be the same?
-        self.time_embedder = nn.Embed(
-            num_embeddings=200, features=self.n_random_node_features // 2
+        self.node_type_embedder = nn.Embed(
+            num_embeddings=5, features=self.n_random_node_features // 2
         )
 
         self.edge_embedder = nn.Embed(num_embeddings=626, features=64)
@@ -158,11 +146,50 @@ class DiffModel(nn.Module):
     def __call__(
         self, jraph_graph_list, X_prev, rand_edge_features_in, t_idx_per_node, key
     ):
+        # Get node type embeddings for sender and receiver nodes
+        node_type_embeddings = self.node_type_embedder(jraph_graph_list["graphs"][0].graph.globals["node_types"])
+        edge_type_embeddings = jnp.concatenate(
+            (
+                node_type_embeddings[jraph_graph_list["graphs"][0].graph.senders],
+                node_type_embeddings[jraph_graph_list["graphs"][0].graph.receivers],
+            ),
+            axis=-1,
+        )
+        
+        # Combine random node features with node type embeddings
+        rand_edge_features = jnp.concatenate((rand_edge_features_in, edge_type_embeddings), axis=-1)
+
+        # Create edge embeddings with time encoding and random features
+        edge_embeddings = self._add_random_nodes_and_time_index(
+            X_prev, rand_edge_features, t_idx_per_node
+        )
+        key, subkey = jax.random.split(key)
+        #node_embeddings = self.node_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.nodes.shape[0]))
+        node_embeddings = jnp.repeat(node_type_embeddings[jraph_graph_list["graphs"][0].graph.globals["node_types"]], 4, axis=-1)
+        node_embeddings = jnp.concatenate((node_embeddings, jax.random.normal(subkey, node_embeddings.shape)), axis=-1)
+
+        cheat = True
+
+        if cheat:
+            node_embeddings = self.node_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.nodes.shape[0]))
+            edge_embeddings = self.edge_embedder(jnp.arange(jraph_graph_list["graphs"][0].graph.edges.shape[0]))
+            edge_state_embeddings = self.edge_state_embedder(X_prev.astype(jnp.int32))[:, 0]
+            edge_embeddings = edge_embeddings + edge_state_embeddings
+
+
+        
+        # Pass to GNN - use edge_embeddings as node features for the GNN
+        #embeddings = self.encode_process_decode(
+        #    {"graphs": [jraph_graph_list["graphs"][0].graph]}, edge_embeddings, node_embeddings
+        #)
+        embeddings = self.dummy_edge_mlp(edge_embeddings)
+        # embeddings shape should be (num_edges, embedding_dim) for edge mode
+        # or (num_nodes, embedding_dim) for node mode
+
         out_dict = {}
-        t_embeddings = self.time_embedder(t_idx_per_node.astype(int)[0])
-        pred = self.dummy_edge_mlp(jnp.concatenate((X_prev.T, t_embeddings), 1)).T
-        out_dict["spin_logits"] = grouped_log_softmax(pred[:, None], jraph_graph_list, jraph_graph_list["graphs"][0].meta["n_groups"])
+        out_dict = self.HeadModel(jraph_graph_list, embeddings[:, None, :], out_dict) # in shape: (626, 1, 64)
         # embeddings[:, None, :] shape: (num_edges/nodes, 1, embedding_dim)
+        rand_edge_features = rand_edge_features[:, jnp.newaxis, :]
         out_dict["rand_node_features"] = (
             rand_edge_features_in  # (11551, 1, 2) | (3151, 1, 2)
         )
