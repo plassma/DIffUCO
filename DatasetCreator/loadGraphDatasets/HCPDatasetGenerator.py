@@ -90,6 +90,7 @@ DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p 
 				 HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
 
 VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
+VERTEX_COLORS = {0: "red", 1: "yellow", 2: "cyan", 3: "green", -1: "gray"}
 
 def plot_graph(igraph, globals, n):
 	omit_nodes = (globals == -1).cumsum()
@@ -134,8 +135,9 @@ def plot_graph(igraph, globals, n):
 	print(f"Mismatches: {mismatches}")
 
 	edge_colors = ["red" if globals_compact[e[1]] == 2 and globals_compact[e[0]] == 1 else "black" for e in edges]
-	vertex_colors = ["black" if globals_compact[i] != 2 else ("red" if owners_of_things[i] != holders_of_things[i] else "green") for i in range(len(globals_compact))]
-	ig.plot(plot_graph, vertex_label=[VERTEX_LABELS[t] for i, t in enumerate(globals_compact)], target=f"plot_{n}.png",) # vertex_color=vertex_colors,edge_color=edge_colors
+	#vertex_colors = ["black" if globals_compact[i] != 2 else ("red" if owners_of_things[i] != holders_of_things[i] else "green") for i in range(len(globals_compact))]
+	vertex_colors = [VERTEX_COLORS[t] for t in globals_compact]
+	ig.plot(plot_graph, vertex_label=[i for i, t in enumerate(globals_compact)], target=f"plot_{n}.png",vertex_color=vertex_colors) # vertex_color=vertex_colors,edge_color=edge_colors
 
 	return mismatches
 

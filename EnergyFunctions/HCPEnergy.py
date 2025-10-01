@@ -69,10 +69,23 @@ class HCPEnergyClass(BaseEnergyClass):
 
 
         #order_violations old:
-        prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
-        prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
-        violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
-        order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
+        #prefix_incl = jax.lax.cumsum(cabinets_x_things, axis=1)
+        #prefix_excl = jnp.pad(prefix_incl[:, :-1], ((0, 0), (1, 0))) > 0
+        #violations_mask = jnp.logical_and(cabinets_x_things[:-1, :].astype(jnp.bool), prefix_excl[1:, :])
+        #order_violations = jnp.array([violations_mask.sum(), 0])[:, None]
+
+
+        # Per row, count how many items have index < t (exclusive prefix count across things)
+        # (jax.lax.cumsum has no 'exclusive' kwarg, so we subtract x to make it exclusive)
+        row_prefix_lt = jnp.cumsum(cabinets_x_things, axis=1) - cabinets_x_things  # shape [C, T]
+
+       # Compute cumulative sum over later cabinets: flip -> cumsum -> flip -> subtract own row
+        rev_cumsum = jnp.flip(jnp.cumsum(jnp.flip(row_prefix_lt, axis=0), axis=0), axis=0)
+        later_row_prefix_lt = 1. * (rev_cumsum - row_prefix_lt).astype(bool)
+
+        # For every (i,t) that is actually present, add how many later-cabinet items have index < t
+        order_violations = jnp.sum(cabinets_x_things * later_row_prefix_lt)
+        order_violations = jnp.array([order_violations, 0])[:, None]
 
         #thing_indices = jnp.arange(meta_graph.meta["things"])[None,:].repeat(meta_graph.meta["cabinets"], axis=0) / meta_graph.meta["things"]
         #cabinet_indices = jnp.arange(meta_graph.meta["cabinets"])[:,None].repeat(meta_graph.meta["things"], axis=1) / meta_graph.meta["cabinets"]
@@ -96,7 +109,7 @@ class HCPEnergyClass(BaseEnergyClass):
 
         energy_ownerships = jax.ops.segment_sum((owners_of_things_nodes != persons_of_things_nodes).astype(jnp.float32), node_gr_idx, n_graph)[..., None]
 
-        energy = energy_ownerships + order_violations + energy_cabinets_per_thing # todo: can order violations be formulated more monotonically?
+        energy = energy_ownerships + order_violations + energy_cabinets_per_thing * 5 # todo: can order violations be formulated more monotonically?
 
         return energy, {"energy_ownerships": energy_ownerships, "order_violations": order_violations, "cabinets_per_thing": energy_cabinets_per_thing}, energy
 

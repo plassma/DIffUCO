@@ -63,6 +63,9 @@ def collate_function(batch):
 class ForwardKL(Base):
     def __init__(self, config, EnergyClass, NoiseClass, model):
         super(ForwardKL, self).__init__(config, EnergyClass, NoiseClass, model)
+        self.vmapped_make_one_step = jax.vmap(self.model.make_one_step, in_axes=(None, None, 1, None, 0, None),
+                                              out_axes=(1, 0))
+
         self.N_basis_states = self.config["N_basis_states"]
         self.n_graphs = self.config["batch_size"] + 1
         self.n_bernoulli_features = self.config["n_bernoulli_features"]
@@ -78,8 +81,8 @@ class ForwardKL(Base):
         self.pmap_sample_X_sequence = jax.pmap(lambda a,b,c,d,e: self.sample_X_sequence(a,b,c,d,e, "train"), in_axes=(0, 0, 0, None, 0) )
         self.sample_X_sequence_eval = lambda a,b,c,d,e: self.sample_X_sequence(a,b,c,d,e, "eval")
 
-        self.pmap_environment_steps = jax.pmap(lambda a,b,c,d,e: self._environment_steps_scan(a,b,c,d,e, "train"), in_axes=(0, 0, 0, None, 0))
-        self._environment_steps_scan_eval = lambda a,b,c,d,e: self._environment_steps_scan(a,b,c,d,e, "eval")
+        self.pmap_environment_steps = jax.pmap(lambda a,b,c,d,e,f: self._environment_steps_scan(a,b,c,d,e,"train", f), in_axes=(0, 0, 0, None, 0,None))
+        self._environment_steps_scan_eval = lambda a,b,c,d,e, f: self._environment_steps_scan(a,b,c,d,e, "eval", f)
 
         ### TODO add exceptions when self.n_diffusion_steps / self.diff_step_batch_size not an int
         self.diff_step_batch_size = min([self.config["minib_diff_steps"], self.n_diffusion_steps])
@@ -135,16 +138,16 @@ class ForwardKL(Base):
         params = optax.apply_updates(params, grad_update)
         return params, opt_state
 
-    def sample(self, params, graphs, energy_graph_batch, T, key):
-        (log_dict, _) =  self._environment_steps_scan_eval(params, graphs, energy_graph_batch, T, key)
+    def sample(self, params, graphs, energy_graph_batch, T, key, temp=1.0):
+        (log_dict, _) =  self._environment_steps_scan_eval(params, graphs, energy_graph_batch, T, key, temp)
         loss = 0.
         return loss, (log_dict, _)
 
-    def train_step(self, params, opt_state, jraph_graph_list, energy_graph_batch, T, key):
+    def train_step(self, params, opt_state, jraph_graph_list, energy_graph_batch, T, key, temp=1.0):
         sampling_start_time = time.time()
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
-        out_dict, _ = self.pmap_environment_steps(params, jraph_graph_list, energy_graph_batch, T, batched_key)
+        out_dict, _ = self.pmap_environment_steps(params, jraph_graph_list, energy_graph_batch, T, batched_key, temp)
         sampling_end_time = time.time()
         sampling_time = sampling_end_time - sampling_start_time
 
@@ -352,6 +355,7 @@ class ForwardKL(Base):
         params = scan_dict["params"]
         X_prev = scan_dict["X_prev"]
         graphs = scan_dict["graphs"]
+        temp = scan_dict["temp"]
         node_gr_idx = scan_dict["node_gr_idx"]
         energy_graph_batch = scan_dict["energy_graph_batch"]
 
@@ -364,7 +368,7 @@ class ForwardKL(Base):
         batched_key = jax.random.split(subkey, num=X_prev.shape[1])
 
         out_dict, _ = self.vmapped_make_one_step(params, graphs, X_prev, model_step_idx_per_node,
-                                                 batched_key)
+                                                 batched_key, temp)
 
         X_next = out_dict["X_next"]
         state_log_probs = out_dict["state_log_probs"]
@@ -401,7 +405,7 @@ class ForwardKL(Base):
         return scan_dict, out_dict
 
     #@partial(jax.jit, static_argnums=(0,6))
-    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, key, mode):
+    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, key, mode, temp=1.0):
         ### TDOD cahnge rewards to non exact expectation rewards
         print("scan function is being jitted")
         if(mode == "train"):
@@ -429,7 +433,7 @@ class ForwardKL(Base):
 
         node_gr_idx, n_graph, total_num_nodes = self._compute_aggr_utils(energy_graph_batch)
         scan_dict = {"log_q_0_T": log_q_0_T, "log_p_0_T":log_p_0_T, "Xs_over_different_steps": Xs_over_different_steps, "prob_over_diff_steps": prob_over_diff_steps, "rand_node_features_diff_steps":rand_node_features_diff_steps,
-                    "step": 0, "node_gr_idx": node_gr_idx, "params": params, "key": key, "X_prev": X_prev, "graphs": graphs, "energy_graph_batch": energy_graph_batch, "T": T}
+                    "step": 0, "node_gr_idx": node_gr_idx, "params": params, "key": key, "X_prev": X_prev, "graphs": graphs, "energy_graph_batch": energy_graph_batch, "T": T, "temp": temp}
 
         scan_dict, out_dict_list = jax.lax.scan(self.scan_body, scan_dict, None, length = overall_diffusion_steps)
 

@@ -618,7 +618,7 @@ class TrainMeanField:
 			wandb.log({"MCMC/Energy": np.mean(self.MCMCSamplerClass.MCMC_Energ_list)})
 			self.MCMCSamplerClass._reset_MCMC_Energy_list()
 
-	def train_step(self, batch_dict, plot=False, epoch_temp=1.0):
+	def train_step(self, batch_dict, plot=False, temp=1.0):
 		### TODO add code that switches of the buffer
 		step1 = time.time()
 		graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "train")
@@ -626,16 +626,16 @@ class TrainMeanField:
 		batching_time = step2 - step1
 
 		self.params, self.opt_state, loss, (log_dict, energy_graph_batch, self.key) = self.TrainerClass.train_step(self.params, self.opt_state, graph_batch,
-																							  energy_graph_batch, self.T, self.key)
+																							  energy_graph_batch, self.T, self.key, temp)
 		
 		if plot:
 			node_gr_idx = jnp.repeat(jnp.arange(graph_batch["graphs"][0].graph.n_node.shape[1]), graph_batch["graphs"][0].graph.n_node[0], axis=0, total_repeat_length=graph_batch["graphs"][0].graph.n_node.sum())
 			manual_energy = []
 			class_energy = []
-			for i in range(log_dict["X_0"].shape[-2]):
+			for i in range(10):#log_dict["X_0"].shape[-2]
 				print("plotting graph", i)
 				manual_energy.append(self.show_graph(graph_batch, log_dict, i))
-				class_energy.append(HCPEnergyClass.calculate_Energy(None, graph_batch["graphs"][0].graph, log_dict["X_0"][0,:,i, 0], node_gr_idx)[0])
+				class_energy.append(HCPEnergyClass.calculate_Energy(None, graph_batch["graphs"][0], log_dict["X_0"][0,:,i, 0], node_gr_idx)[0])
 			
 		return loss, (log_dict, energy_graph_batch, batching_time)
 
@@ -681,7 +681,8 @@ class TrainMeanField:
 				print("batchsize is", len(gt_normed_energies))
 
 				step1 = time.time()
-				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict) # epoch_temp=max(1 - epoch * 4/self.epochs, 0.001)
+				sampling_temp = 1.0#min(1.2,1. + max(0, (self.epochs_since_best-100) / 3000))
+				loss, (log_dict, energy_graph_batch, batching_time) = self.train_step(batch_dict, temp=sampling_temp) # epoch_temp=max(1 - epoch * 4/self.epochs, 0.001)
 				step3 = time.time()
 
 				if("metrics" in log_dict.keys()):
@@ -736,7 +737,8 @@ class TrainMeanField:
 				"train/epoch": epoch,
 				"schedules/lr": new_lr,
 				"schedules/T": self.T,
-				"schedules/time": train_time_needed
+				"schedules/time": train_time_needed,
+				"schedules/sampling_temp": sampling_temp
 
 			}
 
