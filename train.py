@@ -687,7 +687,8 @@ class TrainMeanField:
 
 				if("metrics" in log_dict.keys()):
 					log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
-					batch_log_dict = self.__calculate_reporting(energy_graph_batch,
+					graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "train")
+					batch_log_dict = self.__calculate_reporting(graph_batch["graphs"][0],
 						log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 
 					### concatenate along device dim
@@ -772,6 +773,29 @@ class TrainMeanField:
 		wandb.finish()
 
 
+	def sample(self,N = 4000):
+		dataloader = self.dataloader_val
+		self.TrainerClass.N_test_basis_states = N
+		best_so_far = np.inf
+		for _ in range(100):
+			for iter, (batch_dict) in enumerate(dataloader):
+				graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "eval")
+
+				self.key, subkey = jax.random.split(self.key)
+				batched_key = jax.random.split(subkey, num = len(jax.devices()))
+
+				loss, (log_dict, _) = self.TrainerClass.pmap_sample(self.params, graph_batch, energy_graph_batch, self.T, batched_key)
+
+				vals = log_dict["X_0"].reshape(-1, 626)
+				unique_solutions = np.unique(vals, axis=0)
+				energies = log_dict["metrics"]["energies"].squeeze()
+				best_so_far = min(best_so_far, energies.min())
+				print(f"Mean energy is {np.mean(energies)}, min energy is {np.min(energies)}, max energy is {np.max(energies)}, best so far is {best_so_far}")
+				print(f"Number of unique solutions is {unique_solutions.shape[0]}")
+
+		print(log_dict)
+
+
 	def eval(self, epoch, mode = "eval", plot = False):
 
 		dataloader = self.dataloader_val
@@ -815,7 +839,7 @@ class TrainMeanField:
 
 			energy_dict = {f"energies/{key}": log_dict["energies"][key] for key in log_dict["energies"]}
 
-			batch_log_dict = self.__calculate_reporting(energy_graph_batch,
+			batch_log_dict = self.__calculate_reporting(graph_batch["graphs"][0],
 				log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 
 			for key in batch_log_dict.keys():
@@ -1285,27 +1309,28 @@ class TrainMeanField:
 			wandb.log(plt_dict)
 
 	@partial(jax.jit, static_argnums=(0,))
-	def calc_mean_prob(self,graphs, spin_log_probs):
+	def calc_mean_prob(self,graphs_meta, spin_log_probs):
 		### TODO implement this for more than oe device
-		graphs = jax.tree_map(lambda x: jnp.concatenate(x, axis = 0), graphs)
-		nodes = graphs.nodes
-		edges = graphs.edges
-		n_node = graphs.n_node
-		n_edge = graphs.n_edge
-		n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]
+		#graphs = [graphs_meta.graph]
+		#graphs = jax.tree_map(lambda x: jnp.concatenate(x, axis = 0), graphs)
+		nodes = graphs_meta.graph.nodes
+		edges = graphs_meta.graph.edges
+		n_node = graphs_meta.graph.n_node
+		n_edge = graphs_meta.graph.n_edge
+		n_graph = graphs_meta.graph.n_node.shape[-1]
 		graph_idx = jnp.arange(n_graph)
-		total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
-		total_num_edges = jax.tree_util.tree_leaves(edges)[0].shape[0]
+		total_num_nodes = nodes.shape[1]
+		total_num_edges = edges.shape[1]
 		if self.mode_node_edge == "edge":
-			n_edge -= (graphs.globals["group_ids"] == 0).sum()
 			edge_graph_idx = jnp.repeat(graph_idx, n_edge, axis=0, total_repeat_length=total_num_edges)
-			mean_prob_per_graph = jraph.segment_sum((jnp.exp(spin_log_probs) - 1. * (spin_log_probs==0)), edge_graph_idx, n_graph) / n_edge[:, None,None] # (np.array([graphs.globals["group_ids"].max(), 0]) + 1)[:, None, None]
+			mean_prob_per_graph = jnp.exp(jraph.segment_sum(spin_log_probs, edge_graph_idx, n_graph) / graphs_meta.meta["n_groups"])
 		else:
 			node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
 			mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]
-		return mean_prob_per_graph[:-1]
+		return mean_prob_per_graph[:-1] # target_shape: [1, 20, 1]
 
-	def __calculate_reporting(self, graphs, normed_energies, gt_normed_energies, spin_log_probs, normed_free_energies=np.nan, prefix = ""):
+	def __calculate_reporting(self, graphs_meta, normed_energies, gt_normed_energies, spin_log_probs, normed_free_energies=np.nan, prefix = ""):
+		graphs = graphs_meta.graph
 		gt_normed_energies = np.array(gt_normed_energies)
 		if not np.isnan(normed_free_energies).all():
 			mean_normed_free_energy = np.mean(normed_free_energies)
@@ -1331,7 +1356,7 @@ class TrainMeanField:
 		#print(rel_error, mean_best_rel_error)
 
 
-		mean_prob_per_graph = self.calc_mean_prob(graphs, spin_log_probs)
+		mean_prob_per_graph = self.calc_mean_prob(graphs_meta, spin_log_probs)
 
 		if(np.isnan(np.mean(energies))):
 			print(energies)
