@@ -55,7 +55,7 @@ class DummyEdgeMLP(nn.Module):
     
 class ValueMLP(nn.Module):
     def setup(self):
-        layers = [nn.Dense(features=128), jax.nn.sigmoid, nn.Dense(features=2)]
+        layers = [nn.Dense(features=128), jax.nn.sigmoid,nn.Dense(features=2)]
         self.mlp = nn.Sequential(layers)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
@@ -166,10 +166,11 @@ class DiffModel(nn.Module):
         self, jraph_graph_list, X_prev, rand_edge_features_in, t_idx_per_node, key
     ):
         out_dict = {}
-        t_embeddings = self.time_embedder(t_idx_per_node.astype(int)[0])
-        pred = self.dummy_edge_mlp(jnp.concatenate((X_prev.T, t_embeddings), 1)).T
+        t_embeddings = self.time_embedder(t_idx_per_node.astype(int)[0])#rngs={'dropout': jax.random.key(1)}
+        x = jnp.concatenate((X_prev.T, t_embeddings), 1)
+        pred = self.dummy_edge_mlp(x).T
         out_dict["spin_logits"] = grouped_log_softmax(pred[:, None], jraph_graph_list, jraph_graph_list["graphs"][0].meta["n_groups"])
-        out_dict["Values"] = self.value_mlp(X_prev.T)[0]
+        out_dict["Values"] = self.value_mlp(x)[0]
         # embeddings[:, None, :] shape: (num_edges/nodes, 1, embedding_dim)
         out_dict["rand_node_features"] = (
             rand_edge_features_in  # (11551, 1, 2) | (3151, 1, 2)
@@ -229,8 +230,15 @@ class DiffModel(nn.Module):
     def make_one_step(self, params, jraph_graph_list, X_prev, t_idx_per_node, key, temp=1.0):
         rand_nodes, key = self.reinit_rand_nodes(X_prev, key)
 
-        out_dict, key = self.apply(
-            params, jraph_graph_list, X_prev, rand_nodes, t_idx_per_node, key
+        dropout_key, key = jax.random.split(key)
+        out_dict, _ = self.apply(
+            params,
+            jraph_graph_list,
+            X_prev,
+            rand_nodes,
+            t_idx_per_node,
+            dropout_key,
+            rngs={"dropout": dropout_key},
         )
 
         spin_logits = out_dict["spin_logits"]
@@ -265,8 +273,15 @@ class DiffModel(nn.Module):
     ):
         assert False
         rand_nodes, key = self.reinit_rand_nodes(X_prev, key)
-        out_dict, key = self.apply(
-            params, jraph_graph_list, rand_nodes, X_prev, t_idx, key
+        drop_key, key = jax.random.split(key)
+        out_dict, _ = self.apply(
+            params,
+            jraph_graph_list,
+            rand_nodes,
+            X_prev,
+            t_idx,
+            drop_key,
+            rngs={"dropout": drop_key},
         )
 
         spin_logits = out_dict["spin_logits"]
@@ -351,8 +366,15 @@ class DiffModel(nn.Module):
     def calc_log_q(
         self, params, jraph_graph_list, X_prev, rand_nodes, X_next, t_idx_per_node, key
     ):
-        out_dict, key = self.apply(
-            params, jraph_graph_list, X_prev, rand_nodes, t_idx_per_node, key
+        drop_key, key = jax.random.split(key)
+        out_dict, _ = self.apply(
+            params,
+            jraph_graph_list,
+            X_prev,
+            rand_nodes,
+            t_idx_per_node,
+            drop_key,
+            rngs={"dropout": drop_key},
         )
 
         spin_logits = out_dict["spin_logits"]

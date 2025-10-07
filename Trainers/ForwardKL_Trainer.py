@@ -443,7 +443,7 @@ class ForwardKL(Base):
 
         log_p_0_T = scan_dict["log_p_0_T"]
         log_q_0_T = scan_dict["log_q_0_T"]
-        X_next = scan_dict["X_prev"]#
+        X_next = scan_dict["X_prev"]
 
         X_0 = X_next
 

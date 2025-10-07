@@ -821,6 +821,7 @@ class Base(ABC):
         return (internal_energy - free_energy) / (1 / beta)
 
     def calculate_ising_internal_energy(self, beta, L):
+        assert False
         """
         Calculate the internal energy per spin of the NxN lattice
 

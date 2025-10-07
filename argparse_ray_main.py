@@ -271,7 +271,7 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 1e-4,
+        "lr": 1e-3,
         "batch_size": 30, # H
         "N_basis_states": 100, # n_s
 
@@ -280,9 +280,9 @@ def run( flexible_config, overwrite = True):
         "relaxed": False,
 
         "T_max": 0.01,
-        "T_target": 0.,
+        "T_target": 0.0,
         "N_warmup": 0,
-        "N_anneal": 2000,
+        "N_anneal": 500,
         "N_equil": 0,
         "stop_epochs": 2000,
 

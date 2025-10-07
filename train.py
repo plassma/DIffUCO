@@ -466,6 +466,7 @@ class TrainMeanField:
 		initialize network parameters
 		"""
 		self.key, subkey = jax.random.split(self.key)
+		self.key, drop_key = jax.random.split(self.key)
 		jraph_graph_dict = next(iter(self.dataloader_val))
 
 		if (self.load_wandb_id != None):
@@ -486,7 +487,7 @@ class TrainMeanField:
 				X_prev = jnp.ones((batched_graph.graph.nodes.shape[1], 1))
 				t_idx_per_node = jnp.ones((batched_graph.graph.nodes.shape[1],1))
 				
-			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
+			self.params = self.model.init({"params": subkey, "dropout": drop_key}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
 
 		elif(self.graph_mode == "U_net"):
 			reps = 10
@@ -502,7 +503,7 @@ class TrainMeanField:
 
 			X_prev = jnp.ones((U_net_graph_dict["graphs"][0].nodes.shape[0], 1))
 			rand_node_features = jnp.ones((U_net_graph_dict["graphs"][0].nodes.shape[0], self.n_random_node_features))
-			self.params = self.model.init({"params": subkey}, U_net_graph_dict, X_prev,rand_node_features, 0, subkey)
+			self.params = self.model.init({"params": subkey, "dropout": drop_key}, U_net_graph_dict, X_prev,rand_node_features, 0, subkey)
 			# X_prev = jnp.ones(batched_U_net_graph_dict["graphs"][0].nodes.shape[:-1] +(node_features,))
 			# self.model.apply(self.params, batched_U_net_graph_dict, X_prev)
 		else:
@@ -777,23 +778,23 @@ class TrainMeanField:
 		dataloader = self.dataloader_val
 		self.TrainerClass.N_test_basis_states = N
 		best_so_far = np.inf
-		for _ in range(100):
-			for iter, (batch_dict) in enumerate(dataloader):
-				graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "eval")
+		for iter, (batch_dict) in enumerate(dataloader):
+			graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "eval")
 
-				self.key, subkey = jax.random.split(self.key)
-				batched_key = jax.random.split(subkey, num = len(jax.devices()))
+			self.key, subkey = jax.random.split(self.key)
+			batched_key = jax.random.split(subkey, num = len(jax.devices()))
 
-				loss, (log_dict, _) = self.TrainerClass.pmap_sample(self.params, graph_batch, energy_graph_batch, self.T, batched_key)
+			loss, (log_dict, _) = self.TrainerClass.pmap_sample(self.params, graph_batch, energy_graph_batch, self.T, batched_key)
 
-				vals = log_dict["X_0"].reshape(-1, 626)
-				unique_solutions = np.unique(vals, axis=0)
-				energies = log_dict["metrics"]["energies"].squeeze()
-				best_so_far = min(best_so_far, energies.min())
-				print(f"Mean energy is {np.mean(energies)}, min energy is {np.min(energies)}, max energy is {np.max(energies)}, best so far is {best_so_far}")
-				print(f"Number of unique solutions is {unique_solutions.shape[0]}")
+			vals = log_dict["X_0"].reshape(-1, 626)
+			log_dict["graph_batch"] = graph_batch
+			unique_solutions = np.unique(vals, axis=0)
+			energies = log_dict["metrics"]["energies"].squeeze()
+			best_so_far = min(best_so_far, energies.min())
+			print(f"Mean energy is {np.mean(energies)}, min energy is {np.min(energies)}, max energy is {np.max(energies)}, best so far is {best_so_far}")
+			print(f"Number of unique solutions is {unique_solutions.shape[0]}")
 
-		print(log_dict)
+		return log_dict
 
 
 	def eval(self, epoch, mode = "eval", plot = False):
