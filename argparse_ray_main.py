@@ -131,7 +131,7 @@ def meanfield_run():
     if(local_mode):
         import jax
         #jax.config.update('jax_platform_name', 'cpu')
-        run(flexible_config = {"jit": False}, overwrite = True)
+        run(flexible_config = {"jit": True}, overwrite = True)
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -264,7 +264,7 @@ def run( flexible_config, overwrite = True):
         "seed": 123,
         "lr": 1e-4,
         "batch_size": 30, # H
-        "N_basis_states": 30, # n_s
+        "N_basis_states": 1000, # n_s
 
         "random_node_features": True,
         "n_random_node_features": 5,
@@ -303,8 +303,8 @@ def run( flexible_config, overwrite = True):
         "MCMC_steps": 0,
         "train_mode": "PPO",
         "inner_loop_steps": 2,
-        "minib_diff_steps": 3,
-        "minib_basis_states": 10,
+        "minib_diff_steps": 2,
+        "minib_basis_states": 50,
         "graph_norm": False,
         "proj_method": "None",
         "diff_schedule": "DiffUCO",

@@ -256,16 +256,25 @@ class PPO(Base):
                 split_split_diff_arr_list = self._split_arrays(split_diff_arr, self.n_state_batches, -2)
                 split_split_state_arr_list = self._split_arrays(split_state_arr, self.n_state_batches, -2)
                 for split_split_diff_arr, split_split_state_arr in zip(split_split_diff_arr_list, split_split_state_arr_list):
-                    batch_dict, key = select_time_idxs(graphs["graphs"][0], RL_buffer, split_split_diff_arr, split_split_state_arr, key)
-
-                    key, subkey = jax.random.split(key)
-                    batched_key = jax.random.split(subkey, num=len(jax.devices()))
-                    (loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
+                    #batch_dict, key = select_time_idxs(graphs["graphs"][0], RL_buffer, split_split_diff_arr, split_split_state_arr, key)
+                    #key, subkey = jax.random.split(key)
+                    #batched_key = jax.random.split(subkey, num=len(jax.devices()))
+                    #(loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
+                    (loss, (loss_dict, _)), params, opt_state = self.loop_inner(params, opt_state, graphs, RL_buffer, key, split_split_diff_arr, split_split_state_arr)
 
                     for dict_key in log_dict["Losses"].keys():
                         log_dict["Losses"][dict_key].append(loss_dict[dict_key])
 
         return (loss, (log_dict, key)), params, opt_state
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def loop_inner(self, params, opt_state, graphs, RL_buffer, key, split_diff_arr, split_state_arr):
+        batch_dict, key = select_time_idxs(graphs["graphs"][0], RL_buffer, split_diff_arr, split_state_arr, key)
+        key, subkey = jax.random.split(key)
+        batched_key = jax.random.split(subkey, num=len(jax.devices()))
+        (loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
+        return (loss, (loss_dict, key)), params, opt_state
 
 
     @partial(jax.jit, static_argnums=(0,))
