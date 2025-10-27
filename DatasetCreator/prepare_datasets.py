@@ -15,7 +15,7 @@ SpinGlassUniformdataset = ["SpinGlassUniform_10x10"]
 dataset_choices =  RB_datasets + BA_datasets + TSP_datasets + Gset + IsingModel + SpinGlassdataset + SpinGlassUniformdataset
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--licence_path', default="/system/user/sanokows/", type = str, help='licence base path')
+parser.add_argument('--licence_path', default="/system/user/mplasser/", type = str, help='licence base path')
 parser.add_argument('--seed', default=[123], type = int, help='Define dataset seed', nargs = "+")
 parser.add_argument('--parent', default=False, type = bool, help='use parent directory or not')
 parser.add_argument('--save', default=False, type = bool, help='save the entire dataset in a pickle file or not')
