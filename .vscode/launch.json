@@ -26,7 +26,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",
-            "args": ["--lrs", "0.002", "--GPUs", "1", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "RB_iid_100", "--EnergyFunction", "MIS", "--N_anneal", "2000", "--n_diffusion_steps", "8", "--batch_size", "100", "--n_basis_states", "1000", "--noise_potential", "annealed_obj", "--project_name", "FirstRuns", "--seed", "123", "--debug"],
+            "args": ["--lrs", "0.002", "--GPUs", "4", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "RB_iid_100", "--EnergyFunction", "MIS", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "annealed_obj", "--project_name", "FirstRuns", "--seed", "123", "--debug"],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             }
@@ -36,7 +36,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",
-            "args": ["--lrs", "0.002", "--GPUs", "2", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2001", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "annealed_obj", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--no-jit"],
+            "args": ["--lrs", "0.002", "--GPUs", "3", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "20", "--noise_potential", "annealed_obj", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--no-jit", "--n_diffusion_steps", "4", "--minib_diff_steps", "2", "--minib_basis_states", "10", "--train_mode", "PPO"],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             },
@@ -51,6 +51,13 @@
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             }
+        },
+        {
+            "name": "Sample only",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "sample_from_model.py",
+            "console": "integratedTerminal"
         },
         {
             "name": "Python Debugger: Current File",
