@@ -13,6 +13,7 @@ from unipath import Path
 import os
 import jraph_utils
 from playground.Clusters.Meluxina import data_path
+from GraphWithMeta import GraphWithMeta
 
 
 class SolutionDatasetLoader:
@@ -91,7 +92,7 @@ class SolutionDatasetLoader:
         collate_function = self.pmap_collate
 
         self.dataset_train = dataset_train
-        self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = True, collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None
+        self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = False, collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None
         self.dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if dataset_test != None else None
         self.dataloader_val = DataLoader(dataset_val, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if VAL_DATASET else None
         if(self.dataloader_train != None):
@@ -118,10 +119,10 @@ class SolutionDatasetLoader:
         for batch_dict in current_dataloader:
             input_graph = batch_dict["input_graph"]
             energy_graph = batch_dict["energy_graph"]
-            energy_graph_nodes = [int(el.n_node[0]) for el in energy_graph]
-            input_graph_nodes = [int(el.n_node[0]) for el in input_graph]
-            energy_graph_edges = [int(el.n_edge[0]) for el in energy_graph]
-            input_graph_edges = [int(el.n_edge[0]) for el in input_graph]
+            energy_graph_nodes = [int(el.graph.n_node[0]) for el in energy_graph]
+            input_graph_nodes = [int(el.graph.n_node[0]) for el in input_graph]
+            energy_graph_edges = [int(el.graph.n_edge[0]) for el in energy_graph]
+            input_graph_edges = [int(el.graph.n_edge[0]) for el in input_graph]
 
             statistics_dict["input_graph"]["n_edges"].extend(input_graph_edges)
             statistics_dict["energy_graph"]["n_edges"].extend(energy_graph_edges)
@@ -282,7 +283,13 @@ class SolutionDataset_InMemory(Dataset):
 
         self.get_dataset_paths(config, mode=mode, seed=seed)
         self._init_MCMCBuffer()
+        # Initialize cache for loaded data
+        self._data_cache = {}
+        # Optional: limit cache size to prevent memory issues
+        self._max_cache_size = getattr(config, 'max_cache_size', 1000)
         #super().__init__(self.base_path, None, None, None)
+        for i in range(len(self)): # init cache
+            self.__getitem__(i)
 
     def _init_MCMCBuffer(self):
         self.MCMCBuffer = [None for i in range(self.__len__())]
@@ -335,14 +342,20 @@ class SolutionDataset_InMemory(Dataset):
 
         _, _, files = next(os.walk(load_path))
         file_count = len(files)
-        self.n_graphs = file_count
+        self.n_graphs = 1 # file_count
 
     def __len__(self):
         return self.n_graphs
 
     def __getitem__(self, idx):
+        idx += self.config["use_sample"]
+        # Check if data is already cached
+        if idx in self._data_cache:
+            return self._data_cache[idx]
 
+        # Load data from disk
         with open(self.base_path + f"idx_{idx}_solutions.pickle", "rb") as file:
+            print("loading graph from HDD")
             graph_dict = pickle.load(file)
 
         input_graph = graph_dict["H_graphs"]
@@ -368,11 +381,21 @@ class SolutionDataset_InMemory(Dataset):
 
         # print("compare edges of input graph and energy graph", energy_graphs.edges.shape, input_graph.edges.shape)
         # print("compare edges of input graph and energy graph", energy_graphs.edges, input_graph.edges.shape)
-        input_graph = input_graph._replace(edges = input_graph.edges.astype(np.float32))
-        energy_graphs = energy_graphs._replace(edges = energy_graphs.edges.astype(np.float32))
+        input_graph = GraphWithMeta(graph=input_graph.graph._replace(edges = input_graph.graph.edges.astype(np.float32)), meta=input_graph.meta)
+        energy_graphs = input_graph#energy_graphs._replace(edges = energy_graphs.edges.astype(np.float32))
 
         return_dict = {"input_graph": input_graph, "energy_graph": energy_graphs, "energies": graph_dict["Energies"],
                        "U_net_graph_dict": U_net_graph_dict, "bs_bins": graph_dict["gs_bins"]}
+        
+        # Cache the result
+        self._data_cache[idx] = return_dict
+        
+        # Optional: limit cache size (simple LRU-like behavior)
+        if len(self._data_cache) > self._max_cache_size:
+            # Remove the oldest entry (first key)
+            oldest_key = next(iter(self._data_cache))
+            del self._data_cache[oldest_key]
+            
         return return_dict
 
 

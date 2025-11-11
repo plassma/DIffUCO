@@ -4,6 +4,8 @@ import numpy as np
 import jax
 import time
 
+from GraphWithMeta import GraphWithMeta
+
 
 def pad_with_graphs(graph: jraph.GraphsTuple,
                     n_node: int,
@@ -249,7 +251,13 @@ def pmap_graph_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs, retur
     else:
         return device_batched_graphs
 
-def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
+def pmap_graph_list_better(maybe_meta_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
+    is_meta = False
+    if isinstance(maybe_meta_graph_list[0], GraphWithMeta):
+        jraph_graph_list = [el.graph for el in maybe_meta_graph_list]
+        is_meta = True
+    else:
+        jraph_graph_list = maybe_meta_graph_list
     n_devices = jax.local_device_count()
     n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
     # if (len(jraph_graph_list) % n_devices != 0):
@@ -265,6 +273,10 @@ def pmap_graph_list_better(jraph_graph_list, dataset_statistics_dict, pad_func =
     # print("make list", step2-step1)
     # print("pad graphs", step3-step2)
     # print("next generator", step4-step3)
+    if is_meta:
+        meta = {k: sum(s.meta[k] for s in maybe_meta_graph_list) for k in maybe_meta_graph_list[0].meta}
+        meta |= {k + "_concat": [s.meta[k]] for s in maybe_meta_graph_list for k in maybe_meta_graph_list[0].meta}
+        device_batched_graphs = GraphWithMeta(graph=device_batched_graphs, meta=meta)
     if(return_size):
         return device_batched_graphs, max_pad_nodes_to, max_pad_edges_to
     else:

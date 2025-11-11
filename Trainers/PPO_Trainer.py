@@ -98,7 +98,7 @@ class PPO(Base):
 
     #@partial(jax.jit, static_argnums=(0,))
     def _init_index_arrays(self):
-        self.n_graphs = int(self.config["batch_size"]/self.n_devices) + 1
+        self.n_graphs = self.config["n_graphs"] + 1 #int(self.config["batch_size"]/self.n_devices) + 1 todo plassma: hardcoded for now
         diff_step_arr = jnp.arange(0,self.n_diffusion_steps)
         Nb_arr = jnp.repeat(diff_step_arr[None, ...], self.N_basis_states, axis=0)
         Gb_Nb_arr = jnp.repeat(Nb_arr[None, ...], self.n_graphs, axis=0) #Nb_arr#
@@ -270,7 +270,7 @@ class PPO(Base):
 
     @partial(jax.jit, static_argnums=(0,))
     def loop_inner(self, params, opt_state, graphs, RL_buffer, key, split_diff_arr, split_state_arr):
-        batch_dict, key = select_time_idxs(graphs["graphs"][0], RL_buffer, split_diff_arr, split_state_arr, key)
+        batch_dict, key = select_time_idxs(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
         (loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
@@ -295,7 +295,7 @@ class PPO(Base):
 
         batched_key = jax.random.split(subkey, num=X_prev.shape[1])
 
-        out_dict, _ = self.vmapped_make_one_step(params, graphs, X_prev, model_step_idx_per_node,
+        out_dict, _ = self.vmapped_make_one_step(params, {"graphs": [graphs["graphs"][0].graph]}, X_prev, model_step_idx_per_node,
                                                  batched_key)
 
         X_next = out_dict["X_next"]
@@ -332,9 +332,10 @@ class PPO(Base):
         return scan_dict, out_dict
 
     @partial(jax.jit, static_argnums=(0,6))
-    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, key, mode):
+    def _environment_steps_scan(self, params, graphs, meta_energy_graph_batch, T, key, mode):
         ### TDOD cahnge rewards to non exact expectation rewards
         print("scan function is being jitted")
+        energy_graph_batch = meta_energy_graph_batch.graph
         if(mode == "train"):
             N_basis_states = self.N_basis_states
         else:
@@ -542,7 +543,7 @@ class PPO(Base):
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=Sb_Hb_Nb_A_k.shape[0])
 
-        out_dict, _ = self.vmapped_calc_log_q(params, jraph_graph_list, Sb_Hb_Nb_X_prev, Sb_Hb_Nb_rand_node_features, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
+        out_dict, _ = self.vmapped_calc_log_q(params, {"graphs": [jraph_graph_list["graphs"][0].graph]}, Sb_Hb_Nb_X_prev, Sb_Hb_Nb_rand_node_features, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
 
         out_values = out_dict["Values"]
         state_log_probs = out_dict["state_log_probs"]

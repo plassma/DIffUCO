@@ -1,14 +1,15 @@
 import os
 import argparse
 from train import TrainMeanField
+import numpy as np
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true', help='Switch ray into local mode for debugging')
 parser.add_argument('--multi_gpu', action='store_true', help='wheter to use multi gpu or not, KEEP IT ALWAYS TRUE')
 parser.add_argument('--mode', default='Diffusion', choices = ["Diffusion"], help='Define the Approach')
-parser.add_argument('--EnergyFunction', default='MIS', choices = ["MaxCut", "MIS", "MVC", "MaxCl", "WMIS", "MDS", "MaxClv2", "TSP", "IsingModel", "SpinGlass", "SpinGlass"], help='Define the EnergyFunction of the IsingModel')
-parser.add_argument('--IsingMode', default='RB_iid_100', choices = ["Gset","BA_large","RB_iid_small", "RB_iid_dummy", "BA_dummy", "RB_iid_large" ,"RRG_200_k_=all", "BA_small","TSP_random_100", 
+parser.add_argument('--EnergyFunction', default='MIS', choices = ["HCP", "MaxCut", "MIS", "MVC", "MaxCl", "WMIS", "MDS", "MaxClv2", "TSP", "IsingModel", "SpinGlass", "SpinGlass"], help='Define the EnergyFunction of the IsingModel')
+parser.add_argument('--IsingMode', default='RB_iid_100', choices = ["HCP_dummy", "Gset","BA_large","RB_iid_small", "RB_iid_dummy", "BA_dummy", "RB_iid_large" ,"RRG_200_k_=all", "BA_small","TSP_random_100", 
                                                                     "TSP_random_20", "COLLAB", "IMDB-BINARY", "RB_iid_100_dummy" , "RB_iid_200", "RB_iid_100", "NxNLattice_4x4", "NxNLattice_8x8", "NxNLattice_16x16", "NxNLattice_10x10", "SpinGlassUniform_10x10", "SpinGlass_16x16", "NxNLattice_24x24", "NxNLattice_32x32"], help='Define the Training dataset')
 parser.add_argument('--graph_mode', default='normal', choices = ["normal", "TSPModel", "Transformer", "UNet"], help='Use U-Net or normal GNN, TSP model is a graph based implementation of the transformer, transformer is to be prefered')
 parser.add_argument('--train_mode', default='REINFORCE', choices = ["REINFORCE", "PPO", "Forward_KL"], help='Use U-Net or normal GNN')
@@ -128,10 +129,16 @@ def meanfield_run():
         pass
 
     #run_PPO_experiment_func = lambda flex_conf: run_PPO_experiment_hydra()
+    np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True,)# precision=4
     if(local_mode):
         import jax
+        #jax.config.update("jax_debug_nans", True)
+        #jax.config.update("jax_debug_infs", True)
         #jax.config.update('jax_platform_name', 'cpu')
-        run(flexible_config = {"jit": True}, overwrite = True)
+        if args.EnergyFunction == "MIS":
+            run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
+        else:
+            run(flexible_config = {"AnnealSchedule": "linear", "use_sample": 0, "N_equil": 500,"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": None, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -255,6 +262,9 @@ def detect_and_run_for_loops():
 def run( flexible_config, overwrite = True):
 
     config = {
+        "load_wandb_id": None,
+        "use_sample": 0,
+        "n_graphs": 1,
         "mode": "Diffusion",  # either Diffusion or MeanField
         "dataset_name": "RB_iid_100",
         "problem_name": "MIS",

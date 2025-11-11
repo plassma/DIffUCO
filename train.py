@@ -461,10 +461,11 @@ class TrainMeanField:
 			input_graph_list, energy_graphs = self._prepare_graphs(jraph_graph_dict, mode = "val")
 
 			batched_graph = input_graph_list["graphs"][0]
+			batched_graph = batched_graph.graph
 			X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
 			rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
 
-			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0])]}
+			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0].graph)]}
 			t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
 			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
 
@@ -657,7 +658,7 @@ class TrainMeanField:
 
 				if("metrics" in log_dict.keys()):
 					log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
-					batch_log_dict = self.__calculate_reporting(energy_graph_batch,
+					batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 						log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 
 					### concatenate along device dim
@@ -773,7 +774,7 @@ class TrainMeanField:
 
 			energy_dict = {f"energies/{key}": log_dict["energies"][key] for key in log_dict["energies"]}
 
-			batch_log_dict = self.__calculate_reporting(energy_graph_batch,
+			batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 				log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 
 			for key in batch_log_dict.keys():
@@ -874,10 +875,10 @@ class TrainMeanField:
 			### TODO fix this logging so that batchsize does not have an effect anymore
 			energy_dict = {f"energies/{key}": log_dict["energies"][key] for key in log_dict["energies"]}
 
-			batch_log_dict = self.__calculate_reporting(energy_graph_batch,
+			batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 				log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 
-			batch_CE_log_dict = self.__calculate_reporting(energy_graph_batch,
+			batch_CE_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 				log_dict_metrics["energies_CE"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"], prefix= "CE")
 
 			energy_mat_list.append(log_dict_metrics["energies_CE"])

@@ -7,7 +7,7 @@ from tqdm import tqdm
 import numpy as np
 import igraph as ig
 import matplotlib.pyplot as plt
-from utils.GraphWithMeta import GraphWithMeta
+from GraphWithMeta import GraphWithMeta
 
 @dataclass
 class HCProblem:
@@ -41,7 +41,8 @@ class HCProblem:
 
 	@property
 	def globals(self) -> dict[str, np.ndarray]:
-		return {"node_types": self.node_types, "solution": self.solution_edges}
+		solution = self.solution_edges
+		return {"node_types": np.array(self.node_types), "solution_edges": np.array(solution[0]), "solution_bin": np.array(solution[1])}
 	
 	@property
 	def node_types(self) -> np.ndarray:
@@ -209,7 +210,7 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			globals = problem.globals
 			edges, bin_solution = problem.solution_edges
 
-			#plot(g, globals["node_types"], f"input_sample_{idx}_solution.png", include_legend=False, bin_solution=bin_solution)
+			plot(g, globals["node_types"], f"input_sample_{idx}_solution.png", include_legend=False, bin_solution=bin_solution)
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g)
 			H_graph = H_graph._replace(globals=globals)
