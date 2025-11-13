@@ -9,6 +9,12 @@ import igraph as ig
 import matplotlib.pyplot as plt
 from GraphWithMeta import GraphWithMeta
 
+def to_shape(a, shape, pad_value=-1):
+	a = np.array(a)
+	z = np.full(shape, pad_value)
+	z[:a.shape[0], :a.shape[1]] = a
+	return z
+
 @dataclass
 class HCProblem:
 
@@ -23,7 +29,15 @@ class HCProblem:
 	OFFSET_PERSONS: int = field(init=False)
 	N_NODES: int = field(init=False)
 
+
+	# Fields for the properties
+	globals: dict[str, np.ndarray] = field(init=False)
+	node_types: np.ndarray = field(init=False)
+	classes_per_node: np.ndarray = field(init=False)
+	solution_edges: tuple[list[tuple[int, int]], list[int]] = field(init=False)
+
 	def __post_init__(self):
+		# Existing initialization code
 		self.OFFSET_ROOMS = 0
 		self.OFFSET_CABINETS = self.OFFSET_ROOMS + self.rooms
 		self.OFFSET_THINGS = self.OFFSET_CABINETS + self.cabinets
@@ -33,28 +47,45 @@ class HCProblem:
 		self.edges_RxC = [(r + self.OFFSET_ROOMS, c + self.OFFSET_CABINETS) for r in range(self.rooms) for c in range(self.cabinets)]
 		self.edges_CxT = [(c + self.OFFSET_CABINETS, t + self.OFFSET_THINGS) for c in range(self.cabinets) for t in range(self.things)]
 		self.edges_PxR = [(p + self.OFFSET_PERSONS, r + self.OFFSET_ROOMS) for p in range(self.persons) for r in range(self.rooms)]
-		self.edges_TxP = [(t + p * 10 + self.OFFSET_THINGS, p + self.OFFSET_PERSONS) for p in range(self.persons) for t in range(10)] # default ownership - 10 things per person
+		self.edges_TxP = [(t + p * 10 + self.OFFSET_THINGS, p + self.OFFSET_PERSONS) for p in range(self.persons) for t in range(10)]  # default ownership - 10 things per person
 		self.all_edges = sorted(self.edges_RxC + self.edges_CxT + self.edges_PxR + self.edges_TxP)
 
 		self.igraph = ig.Graph(n=self.N_NODES, edges=self.all_edges)
 
+		# Initialize the new fields
+		self.node_types = self._initialize_node_types()
+		self.classes_per_node = self._initialize_classes_per_node()
+		self.solution_edges, self.solution_bin = self._initialize_solution_edges()
+		self.neighbours_per_node = self._init_neighbours_per_node()
 
-	@property
-	def globals(self) -> dict[str, np.ndarray]:
-		solution = self.solution_edges
-		return {"node_types": np.array(self.node_types), "solution_edges": np.array(solution[0]), "solution_bin": np.array(solution[1])}
-	
-	@property
-	def node_types(self) -> np.ndarray:
+		self.globals = {"node_types": self.node_types, "solution_bin": self.solution_bin, "classes_per_node": self.classes_per_node, "neighbours_per_node": self.neighbours_per_node}
+
+	def _init_neighbours_per_node(self) -> list[list[int]]:
+		neighbours = [to_shape([[self.OFFSET_PERSONS + p for p in range(self.persons)] for _ in range(self.rooms)], (self.rooms, self.cabinets)),
+				to_shape([[self.OFFSET_ROOMS + r for r in range(self.rooms)] for _ in range(self.cabinets)], (self.cabinets, self.cabinets)),
+				to_shape([[self.OFFSET_CABINETS + c for c in range(self.cabinets)] for _ in range(self.things)], (self.things, self.cabinets)),
+				to_shape([self.persons * [-1]], (self.persons, self.cabinets))]
+		
+		return np.concatenate(neighbours, 0)
+
+	def _initialize_node_types(self) -> np.ndarray:
 		return np.array(
-            [0] * self.rooms +
-            [1] * self.cabinets +
-            [2] * self.things +
-            [3] * self.persons
-        )
-	
-	@property
-	def solution_edges(self):
+			[0] * self.rooms +
+			[1] * self.cabinets +
+			[2] * self.things +
+			[3] * self.persons
+		)
+
+	def _initialize_classes_per_node(self) -> np.ndarray:
+		classes_per_node_type = np.array([
+			self.persons,  # rooms connected to persons
+			self.rooms,    # cabinets connected to rooms
+			self.cabinets, # things connected to cabinets
+			1              # persons connected to things
+		])
+		return classes_per_node_type[self.node_types]
+
+	def _initialize_solution_edges(self) -> tuple[list[tuple[int, int]], list[int]]:
 		edges = list(self.edges_TxP)
 
 		rooms = [r for r in range(self.rooms)]
@@ -86,14 +117,14 @@ class HCProblem:
 				bin_solution.append(0)
 		assert j == len(edges)
 
-		return edges, bin_solution
+		return np.array(edges), np.array(bin_solution)
 	
 	def plot(self, target, include_legend=False):
 		return plot(self.igraph, self.node_types, target, include_legend)
 	
 def plot(igraph, node_types, target, include_legend=False, bin_solution=None, verbose=False):
 	edges = igraph.get_edgelist()
-	edges = [(a, b) for i, (a, b) in enumerate(edges) if not bin_solution or bin_solution[i]]
+	edges = [(a, b) for i, (a, b) in enumerate(edges) if bin_solution is None or bin_solution[i]]
 	plot_graph = ig.Graph(edges=edges)
 
 	vertex_label_appendix = []
@@ -208,7 +239,7 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			g = problem.igraph
 
 			globals = problem.globals
-			edges, bin_solution = problem.solution_edges
+			bin_solution = problem.solution_bin
 
 			plot(g, globals["node_types"], f"input_sample_{idx}_solution.png", include_legend=False, bin_solution=bin_solution)
 

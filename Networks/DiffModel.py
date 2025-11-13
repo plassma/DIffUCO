@@ -6,6 +6,8 @@ import flax.linen as nn
 from functools import partial
 
 from Networks.Modules import get_GNN_model
+from Networks.Modules.HeadModules.RLHead import global_graph_aggr
+from Networks.Modules.MLPModules.MLPs import ValueMLP
 
 class DiffModel(nn.Module):
 	"""
@@ -81,18 +83,35 @@ class DiffModel(nn.Module):
 		self.vamp_get_sinusoidal_positional_encoding = jax.vmap(get_sinusoidal_positional_encoding, in_axes=(0, None, None))
 		### TODO random node feature key is different during eval and sample, force them to be the same?
 
+		self.W_k = nn.Dense(features=self.n_features_list_decode[0], dtype=dtype)
+		self.W_q = nn.Dense(features=self.n_features_list_decode[0], dtype=dtype)
+		self.value_mlp = ValueMLP(n_features_list=[12, 64, 1], dtype=dtype)
+
 	@flax.linen.jit
 	def __call__(self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key):
-		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node)
+		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node, jraph_graph_list["graphs"][0])
 		embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
 
 		bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis = -2)
-		embeddings = bernoulli_embeddings
+		embeddings_aranged_for_nodes = embeddings[jraph_graph_list["graphs"][0].globals["neighbours_per_node"]]
 
+		embeddings = self.W_q(embeddings)
+		embeddings_aranged_for_nodes = self.W_k(embeddings_aranged_for_nodes)
+
+		scores = jnp.einsum('nd,ncd->nc', embeddings, embeddings_aranged_for_nodes) / jnp.sqrt(embeddings.shape[-1])
 		out_dict = {}
-		out_dict = self.HeadModel(jraph_graph_list, embeddings, out_dict)
+		out_dict = self.HeadModel(jraph_graph_list, bernoulli_embeddings, out_dict)
+		#out_dict["spin_logits"].shape (71, 1, 2)
+		#out_dict["Values"].shape (2,)
+		
+		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
+		value_emb = global_graph_aggr(embeddings[:, None], node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
+		Values = self.value_mlp(value_emb)[..., 0, 0]
 
-		out_dict["rand_node_features"] = rand_node_features
+		out_dict = {
+			"spin_logits": jax.nn.log_softmax(scores + (1 - self.get_mask(jraph_graph_list["graphs"][0])) * -1e9)[:, None],
+			"Values": Values
+		}
 		return out_dict, key
 
 	#@partial(flax.linen.jit, static_argnums=0)
@@ -114,15 +133,15 @@ class DiffModel(nn.Module):
 		return rand_nodes, key
 
 	@partial(flax.linen.jit, static_argnums=(0,))
-	def _add_random_nodes_and_time_index(self, X_t, rand_nodes, t_idx_per_node):
+	def _add_random_nodes_and_time_index(self, X_t, rand_nodes, t_idx_per_node, jraph_graph):
 		if(self.time_encoding == "one_hot"):
 			X_embed = jax.nn.one_hot(jnp.squeeze(t_idx_per_node, axis = -1), num_classes=self.n_diffusion_steps)
 		else:
 			X_embed = self.vamp_get_sinusoidal_positional_encoding(jnp.squeeze(t_idx_per_node, axis = -1), self.embedding_dim, self.n_diff_steps)
 
-		X_one_hot = jax.nn.one_hot(X_t[...,0], num_classes=self.n_bernoulli_features)
+		X_one_hot = jax.nn.one_hot(X_t[..., 0], num_classes=jraph_graph.meta["cabinets"])
 
-		X_input = jnp.concatenate([X_one_hot, X_embed, rand_nodes], axis=-1)
+		X_input = jnp.concatenate([X_one_hot, X_embed], axis=-1) # we don't need rand_nodes!
 		return X_input
 
 	@partial(flax.linen.jit, static_argnums=0)
@@ -135,7 +154,7 @@ class DiffModel(nn.Module):
 
 		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
 
-		X_next, spin_log_probs, key = self.sample_from_model( spin_logits, key)
+		X_next, spin_log_probs, key = self.sample_from_model(spin_logits, jraph_graph_list, key)
 		
 		graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)/(n_node))[:-1]))
 		out_dict["X_next"] = X_next
@@ -178,7 +197,7 @@ class DiffModel(nn.Module):
 		return X_next, spin_log_probs, spin_logits, graph_log_prob, key
 
 	@partial(flax.linen.jit, static_argnums=0)
-	def sample_from_model(self, spin_logits, key):
+	def sample_from_model(self, spin_logits, jraph_graph_list, key):
 		key, subkey = jax.random.split(key)
 		X_next = jax.random.categorical(key=subkey,
 											   logits=spin_logits,
@@ -186,7 +205,7 @@ class DiffModel(nn.Module):
 											   shape=spin_logits.shape[:-1])
 
 
-		one_hot_state = jax.nn.one_hot(X_next, num_classes=self.n_bernoulli_features)
+		one_hot_state = jax.nn.one_hot(X_next, num_classes=jraph_graph_list["graphs"][0].meta["cabinets"])
 		#X_next = jnp.expand_dims(X_next, axis = -1)
 		spin_log_probs = jnp.sum(spin_logits * one_hot_state, axis=-1)
 
@@ -221,11 +240,12 @@ class DiffModel(nn.Module):
 		:return:
 		'''
 
-		shape = X_T.shape[0:-1]
-		log_p_uniform = self._get_prior( shape)
+		shape = X_T.shape
+		log_p_uniform = self._get_prior(shape, j_graph, soft=True)
 
-		one_hot_state = jax.nn.one_hot(X_T[...,-1], num_classes=self.n_bernoulli_features)
-		log_p_X_T_per_node = jnp.sum(log_p_uniform * one_hot_state, axis=-1)
+		one_hot_state = jax.nn.one_hot(X_T[..., 0], num_classes=j_graph.meta["cabinets"])
+		log_p_X_T_per_node = jnp.sum(log_p_uniform * one_hot_state, axis=-1) # hereasdf
+
 
 		nodes = j_graph.nodes
 		n_node = j_graph.n_node
@@ -246,14 +266,14 @@ class DiffModel(nn.Module):
 		shape = (nodes.shape[0], N_basis_states, 1)
 
 		key, subkey = jax.random.split(key)
-		log_p_uniform = self._get_prior(shape)
+		log_p_uniform = self._get_prior(shape, j_graph)
 
 		X_prev = jax.random.categorical(key=subkey,
 										logits=log_p_uniform,
 										axis=-1,
-										shape=log_p_uniform.shape[:-1])
+										shape=log_p_uniform.shape[:-1])[..., None]
 
-		one_hot_state = jax.nn.one_hot(X_prev, num_classes=self.n_bernoulli_features)
+		one_hot_state = jax.nn.one_hot(X_prev[..., 0], num_classes=j_graph.meta["cabinets"])
 		return X_prev, one_hot_state, log_p_uniform, key
 
 	@partial(flax.linen.jit, static_argnums=(0,2))
@@ -262,10 +282,17 @@ class DiffModel(nn.Module):
 		log_p_X_T = self.calc_log_q_T(j_graph, X_T)
 		return X_T, log_p_X_T, one_hot_state, log_p_uniform, key
 
+	@partial(flax.linen.jit, static_argnums=(0,))
+	def get_mask(self, meta_graph):
+		mask = (jnp.arange(meta_graph.meta["cabinets"])[None, :] < meta_graph.graph.globals["classes_per_node"][:, None])
+		return mask * 1.0
+
 	@partial(flax.linen.jit, static_argnums=(0,1))
-	def _get_prior(self, shape):
-		log_p_uniform = jnp.log(1./self.n_bernoulli_features * jnp.ones(shape +  (self.n_bernoulli_features, )))
-		return log_p_uniform
+	def _get_prior(self, shape, meta_graph, soft=False):
+		shape = shape[:-1] + (meta_graph.meta["cabinets"],)
+		p_uniform = jnp.ones(shape) / jnp.maximum(meta_graph.graph.globals["classes_per_node"], 1)[:, None, None]
+		mask = self.get_mask(meta_graph)[:, None] * 1.0
+		return jnp.log(p_uniform * mask + (1e-10 if soft else 0))
 
 	#@partial(flax.linen.jit, static_argnums=(0,-1))
 	def __get_log_prob(self, spin_log_probs, node_graph_idx, n_graph):

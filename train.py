@@ -124,6 +124,8 @@ class TrainMeanField:
 				self.n_bernoulli_features = 20
 			elif("100" in self.dataset_name):
 				self.n_bernoulli_features = 100
+		elif self.problem_name == "HCP":
+			self.n_bernoulli_features = 10 # todo plassma: hardcoded for now
 		else:
 			self.n_bernoulli_features = 2
 
@@ -461,11 +463,10 @@ class TrainMeanField:
 			input_graph_list, energy_graphs = self._prepare_graphs(jraph_graph_dict, mode = "val")
 
 			batched_graph = input_graph_list["graphs"][0]
-			batched_graph = batched_graph.graph
 			X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
 			rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
 
-			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0].graph)]}
+			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0])]}
 			t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
 			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
 

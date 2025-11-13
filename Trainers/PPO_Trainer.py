@@ -295,7 +295,7 @@ class PPO(Base):
 
         batched_key = jax.random.split(subkey, num=X_prev.shape[1])
 
-        out_dict, _ = self.vmapped_make_one_step(params, {"graphs": [graphs["graphs"][0].graph]}, X_prev, model_step_idx_per_node,
+        out_dict, _ = self.vmapped_make_one_step(params, {"graphs": [graphs["graphs"][0]]}, X_prev, model_step_idx_per_node,
                                                  batched_key)
 
         X_next = out_dict["X_next"]
@@ -304,9 +304,9 @@ class PPO(Base):
         spin_logits_next = out_dict["spin_logits"]
         graph_log_prob = out_dict["graph_log_prob"]
         Values = out_dict["Values"]
-        rand_node_features = out_dict["rand_node_features"]
+        #rand_node_features = out_dict["rand_node_features"]
 
-        scan_dict["rand_node_features_diff_steps"] = scan_dict["rand_node_features_diff_steps"].at[i].set(rand_node_features)
+        #scan_dict["rand_node_features_diff_steps"] = scan_dict["rand_node_features_diff_steps"].at[i].set(rand_node_features)
 
         entropy_step = self._get_entropy_step(energy_graph_batch, state_log_probs, node_gr_idx)
         ### TODO is this still correct for annealed noise distr? Anneled reward should be given to step i-1?!
@@ -342,7 +342,7 @@ class PPO(Base):
             N_basis_states = self.N_test_basis_states
 
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(energy_graph_batch,
+        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(meta_energy_graph_batch,
                                                                                              N_basis_states,
                                                                                              key)
 
@@ -357,7 +357,7 @@ class PPO(Base):
         rand_node_features_diff_steps = jnp.zeros(
             (overall_diffusion_steps, X_prev.shape[0], X_prev.shape[1], self.n_random_node_features), dtype=jnp.float32)
 
-        prob_over_diff_steps = prob_over_diff_steps.at[0].set(1/self.n_bernoulli_features)
+        prob_over_diff_steps = prob_over_diff_steps.at[0].set(1/self.n_bernoulli_features) # todo plassma: prior prob wrong
         Xs_over_different_steps = Xs_over_different_steps.at[0].set(X_prev)
 
 
