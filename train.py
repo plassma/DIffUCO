@@ -11,6 +11,7 @@ import jraph
 from tqdm import tqdm
 import wandb
 from matplotlib import pyplot as plt
+from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot
 from NoiseDistributions import get_Noise_class
 from Trainers import get_Trainer_class
 from Networks.DiffModel import DiffModel
@@ -18,7 +19,6 @@ from jraph_utils import pmap_batch_U_net_graph_dict_and_pad
 from utils.lr_schedule import cos_schedule
 from EnergyFunctions import get_Energy_class
 from MCMC import MCMCSampler
-
 from Data.LoadGraphDataset import SolutionDatasetLoader
 from jax.tree_util import tree_flatten
 import time
@@ -26,7 +26,7 @@ import jraph_utils
 from utils import reshape_utils
 from utils import dict_count
 import os
-
+import tempfile
 import warnings
 
 # def my_formatwarning(message, category, filename, lineno, line=None):
@@ -742,6 +742,12 @@ class TrainMeanField:
 				break
 		wandb.finish()
 
+	def show_graph(self, graph_batch, log_dict, target, select_sample = 0):
+		sample = log_dict["X_0"][0,select_sample,:, 0]
+		edges = [(graph_batch["graphs"][0].graph.senders[0,i], graph_batch["graphs"][0].graph.receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].graph.senders[0,i] != graph_batch["graphs"][0].graph.receivers[0,i]]
+		graph = ig.Graph(edges=edges)
+		return plot_graph(graph, graph_batch["graphs"][0].graph.globals["node_types"][0], target)
+
 
 	def eval(self, epoch, mode = "eval"):
 
@@ -762,6 +768,10 @@ class TrainMeanField:
 			batched_key = jax.random.split(subkey, num = len(jax.devices()))
 
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode, epoch = epoch, epochs = self.epochs)
+
+			with tempfile.NamedTemporaryFile(suffix=".png") as target:
+				plot()
+				wandb.log({"random sample": wandb.Image(target.name)})
 
 
 			log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
@@ -1236,7 +1246,8 @@ class TrainMeanField:
 		graph_idx = jnp.arange(n_graph)
 		total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
 		node_graph_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
-		mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs), node_graph_idx, n_graph) / n_node[:, None,None]
+		mask_not_person = jnp.where(graphs.globals["node_types"] != 3, 1, 0)[..., None, None]
+		mean_prob_per_graph = jraph.segment_sum(jnp.exp(spin_log_probs) * mask_not_person, node_graph_idx, n_graph) / jraph.segment_sum(mask_not_person, node_graph_idx, n_graph)
 		return mean_prob_per_graph[:-1]
 
 	def __calculate_reporting(self, graphs, normed_energies, gt_normed_energies, spin_log_probs, normed_free_energies=np.nan, prefix = ""):

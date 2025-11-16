@@ -23,9 +23,18 @@ class SolutionDatasetLoader:
         self.batch_size = batch_size
         self.relaxed = relaxed
         self.seed = seed
-        self.num_workers = max([self.batch_size,40])
         self.config = config
         self.mode = mode
+
+        default_workers = max(self.batch_size, 40)
+        if self.config.get("dataset_in_memory", True):
+            default_workers = 0
+        self.num_workers = self.config.get("dataloader_num_workers", default_workers)
+        self.prefetch_factor = self.config.get("dataloader_prefetch_factor", 2)
+        if self.num_workers > 0:
+            self.persistent_workers = self.config.get("dataloader_persistent_workers", True)
+        else:
+            self.persistent_workers = False
 
         torch.manual_seed(self.seed)
         self._init_mode()
@@ -91,10 +100,38 @@ class SolutionDatasetLoader:
 
         collate_function = self.pmap_collate
 
+        def _loader_kwargs(**extra_kwargs):
+            loader_kwargs = dict(
+                batch_size=self.batch_size,
+                collate_fn=collate_function,
+                num_workers=self.num_workers,
+                worker_init_fn=seed_worker,
+                generator=generator
+            )
+            loader_kwargs.update(extra_kwargs)
+            if self.num_workers > 0:
+                loader_kwargs["prefetch_factor"] = self.prefetch_factor
+                loader_kwargs["persistent_workers"] = self.persistent_workers
+            return loader_kwargs
+
         self.dataset_train = dataset_train
-        self.dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, drop_last = False, collate_fn=collate_function, num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker, generator=generator) if TRAIN_DATASET else None
-        self.dataloader_test = DataLoader(dataset_test, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if dataset_test != None else None
-        self.dataloader_val = DataLoader(dataset_val, batch_size=self.batch_size, collate_fn=collate_function, num_workers=self.num_workers, worker_init_fn=seed_worker, generator=generator) if VAL_DATASET else None
+        if TRAIN_DATASET:
+            train_kwargs = _loader_kwargs(drop_last=False, shuffle=True)
+            self.dataloader_train = DataLoader(self.dataset_train, **train_kwargs)
+        else:
+            self.dataloader_train = None
+
+        if TEST_DATASET:
+            test_kwargs = _loader_kwargs()
+            self.dataloader_test = DataLoader(dataset_test, **test_kwargs)
+        else:
+            self.dataloader_test = None
+
+        if VAL_DATASET:
+            val_kwargs = _loader_kwargs()
+            self.dataloader_val = DataLoader(dataset_val, **val_kwargs)
+        else:
+            self.dataloader_val = None
         if(self.dataloader_train != None):
             self._compute_dataset_statistics(mode = "train")
         if(self.dataloader_val != None):
@@ -148,9 +185,19 @@ class SolutionDatasetLoader:
         generator = torch.Generator()
         generator.manual_seed(self.seed+ epoch)
 
-        dataloader_train = DataLoader(self.dataset_train, batch_size=self.batch_size, collate_fn= self.pmap_collate,
-                                      num_workers=self.num_workers, shuffle=True, worker_init_fn=seed_worker,
-                                      generator=generator)
+        loader_kwargs = dict(
+            batch_size=self.batch_size,
+            collate_fn=self.pmap_collate,
+            num_workers=self.num_workers,
+            shuffle=True,
+            worker_init_fn=seed_worker,
+            generator=generator
+        )
+        if self.num_workers > 0:
+            loader_kwargs["prefetch_factor"] = self.prefetch_factor
+            loader_kwargs["persistent_workers"] = self.persistent_workers
+
+        dataloader_train = DataLoader(self.dataset_train, **loader_kwargs)
         return dataloader_train
 
 

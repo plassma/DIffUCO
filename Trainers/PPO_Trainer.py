@@ -320,7 +320,7 @@ class PPO(Base):
         scan_dict["log_policies"] = scan_dict["log_policies"].at[i].set(state_log_probs)
         scan_dict["Values_over_diff_steps"] = scan_dict["Values_over_diff_steps"].at[i].set(Values)
 
-        average_probs = jnp.mean(graph_log_prob[:-1])
+        average_probs = jnp.mean(graph_log_prob)
         scan_dict["prob_over_diff_steps"] = scan_dict["prob_over_diff_steps"].at[i + 1].set(average_probs)
 
         scan_dict["X_prev"] = X_prev
@@ -332,17 +332,16 @@ class PPO(Base):
         return scan_dict, out_dict
 
     @partial(jax.jit, static_argnums=(0,6))
-    def _environment_steps_scan(self, params, graphs, meta_energy_graph_batch, T, key, mode):
+    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, key, mode):
         ### TDOD cahnge rewards to non exact expectation rewards
         print("scan function is being jitted")
-        energy_graph_batch = meta_energy_graph_batch.graph
         if(mode == "train"):
             N_basis_states = self.N_basis_states
         else:
             N_basis_states = self.N_test_basis_states
 
         overall_diffusion_steps = self.n_diffusion_steps * self.eval_step_factor
-        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(meta_energy_graph_batch,
+        X_prev, log_q_T, one_hot_state, log_p_uniform, key = self.model.sample_prior_w_probs(energy_graph_batch,
                                                                                              N_basis_states,
                                                                                              key)
 
@@ -373,7 +372,7 @@ class PPO(Base):
         spin_logits_next = out_dict_list["spin_logits_next"][-1]
 
         X_next = scan_dict["X_prev"]#
-        energy_step, Hb, best_X_0, key = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, key)
+        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, key)
         energy_reward = -energy_step
 
         noise_rewards = scan_dict["noise_rewards"]
@@ -426,7 +425,7 @@ class PPO(Base):
                                                   "y_values": jnp.mean(jnp.mean(noise_rewards[:, :-1], axis=-1),
                                                                        axis=-1)}
                                 },
-                    "energies": {"HA": graph_energies, "Hb": Hb},
+                    "energies": {"HA": graph_energies, "Hb": Hb, **energy_dict},
                     "log_p_0": spin_logits_next,
                     "X_0": X_0,
                     "best_X_0": best_X_0,
@@ -474,11 +473,12 @@ class PPO(Base):
             best_X_0, relaxed_energies_per_graph, Hb_per_graph = self.vmapped_energy_CE(jraph_graph, X_0, node_gr_idx)
             Hb = jnp.mean(jnp.abs(Hb_per_graph[:-1]))
         else:
-            relaxed_energies_per_graph, _, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx)
+            relaxed_energies_per_graph, energy_dict, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx)
             best_X_0 = X_0
             Hb = jnp.mean(jnp.abs(Hb_per_graph)[:-1])
+            energy_dict = {k: v[:-1] for k, v in energy_dict.items()}
 
-        return relaxed_energies_per_graph[...,0], Hb, best_X_0, key
+        return relaxed_energies_per_graph[...,0], Hb, best_X_0, key, energy_dict
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_energy_reward_relaxed(self, jraph_graph, spin_logits, node_gr_idx):
@@ -543,7 +543,7 @@ class PPO(Base):
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=Sb_Hb_Nb_A_k.shape[0])
 
-        out_dict, _ = self.vmapped_calc_log_q(params, {"graphs": [jraph_graph_list["graphs"][0].graph]}, Sb_Hb_Nb_X_prev, Sb_Hb_Nb_rand_node_features, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
+        out_dict, _ = self.vmapped_calc_log_q(params, jraph_graph_list, Sb_Hb_Nb_X_prev, Sb_Hb_Nb_rand_node_features, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
 
         out_values = out_dict["Values"]
         state_log_probs = out_dict["state_log_probs"]

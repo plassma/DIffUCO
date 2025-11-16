@@ -50,15 +50,15 @@ class HCProblem:
 		self.edges_TxP = [(t + p * 10 + self.OFFSET_THINGS, p + self.OFFSET_PERSONS) for p in range(self.persons) for t in range(10)]  # default ownership - 10 things per person
 		self.all_edges = sorted(self.edges_RxC + self.edges_CxT + self.edges_PxR + self.edges_TxP)
 
-		self.igraph = ig.Graph(n=self.N_NODES, edges=self.all_edges)
+		self.igraph = ig.Graph(n=self.OFFSET_PERSONS, edges=self.all_edges)
 
 		# Initialize the new fields
 		self.node_types = self._initialize_node_types()
 		self.classes_per_node = self._initialize_classes_per_node()
-		self.solution_edges, self.solution_bin = self._initialize_solution_edges()
+		self.solution_edges, self.solution_bin, self.solution_nodes = self._initialize_solution()
 		self.neighbours_per_node = self._init_neighbours_per_node()
 
-		self.globals = {"node_types": self.node_types, "solution_bin": self.solution_bin, "classes_per_node": self.classes_per_node, "neighbours_per_node": self.neighbours_per_node}
+		self.globals = {"node_types": self.node_types, "solution_bin": self.solution_bin, "classes_per_node": self.classes_per_node, "neighbours_per_node": self.neighbours_per_node, "solution_nodes": self.solution_nodes}
 
 	def _init_neighbours_per_node(self) -> list[list[int]]:
 		neighbours = [to_shape([[self.OFFSET_PERSONS + p for p in range(self.persons)] for _ in range(self.rooms)], (self.rooms, self.cabinets)),
@@ -85,9 +85,10 @@ class HCProblem:
 		])
 		return classes_per_node_type[self.node_types]
 
-	def _initialize_solution_edges(self) -> tuple[list[tuple[int, int]], list[int]]:
+	def _initialize_solution(self) -> tuple[list[tuple[int, int]], list[int]]:
 		edges = list(self.edges_TxP)
 
+		solution_nodes = np.full(self.N_NODES, -1, dtype=int)
 		rooms = [r for r in range(self.rooms)]
 		cabinets = [c + self.OFFSET_CABINETS for c in range(self.cabinets)]
 		things = [t + self.OFFSET_THINGS for t in range(self.things)]
@@ -95,14 +96,17 @@ class HCProblem:
 
 		ci = 0
 		for thing in things:
+			solution_nodes[thing] = ci // 5 + self.OFFSET_CABINETS
 			edges.append((cabinets[ci // 5], thing))
 			ci += 1
 		ri = 0
 		for c in cabinets:
+			solution_nodes[c] = ri // 2 + self.OFFSET_ROOMS
 			edges.append((rooms[ri // 2], c))
 			ri += 1
 
 		for r, p in zip(rooms, persons):
+			solution_nodes[r] = p
 			edges.append((p, r))
 
 		edges.sort()
@@ -117,15 +121,26 @@ class HCProblem:
 				bin_solution.append(0)
 		assert j == len(edges)
 
-		return np.array(edges), np.array(bin_solution)
+		return np.array(edges), np.array(bin_solution), solution_nodes
 	
 	def plot(self, target, include_legend=False):
 		return plot(self.igraph, self.node_types, target, include_legend)
 	
-def plot(igraph, node_types, target, include_legend=False, bin_solution=None, verbose=False):
-	edges = igraph.get_edgelist()
-	edges = [(a, b) for i, (a, b) in enumerate(edges) if bin_solution is None or bin_solution[i]]
-	plot_graph = ig.Graph(edges=edges)
+def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=None, solution_nodes = None, verbose=False):
+	if solution_nodes is not None:
+		edges = [(i, int(j)) for i, j in enumerate(solution_nodes) if int(j) != -1]
+		things = [i for i in range(len(node_types)) if node_types[i] == 2]
+		persons = [i for i in range(len(node_types)) if node_types[i] == 3]
+		for i, t in enumerate(things):
+			edges.append((t, persons[i//10]))
+		plot_graph = ig.Graph(edges=edges)
+	elif bin_solution_edge is not None:
+		edges = igraph.get_edgelist()
+		edges = [(a, b) for i, (a, b) in enumerate(edges) if bin_solution_edge is None or bin_solution_edge[i]]
+		plot_graph = ig.Graph(edges=edges)
+	else:
+		plot_graph = igraph.copy()
+	edges = plot_graph.get_edgelist()
 
 	vertex_label_appendix = []
 	vertex_color_appendix = []
@@ -136,43 +151,46 @@ def plot(igraph, node_types, target, include_legend=False, bin_solution=None, ve
 		vertex_color_appendix = [VERTEX_COLORS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
 		vertex_label_appendix = [VERTEX_LABELS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
 
-	things = [i for i in range(len(node_types)) if node_types[i] == 2]
-	rooms = [i for i in range(len(node_types)) if node_types[i] == 0]
-	cabinets = [i for i in range(len(node_types)) if node_types[i] == 1]
-
-
-	owners_of_things = {}
-
-	for thing in things:
-		connections_to_persons = sum(1 for e in edges if e[0] == thing and node_types[e[1]] == 3)
-		connections_to_cabinets = sum(1 for e in edges if e[1] == thing and node_types[e[0]] == 1)
-		if verbose:
-			print(f"Thing {thing} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
-		owners_of_things[thing] = [e[1] for e in edges if e[0] == thing and node_types[e[1]] == 3][0]
-	
-	owners_of_rooms = {}
-
-	for room in rooms:
-		connections_to_persons = sum(1 for e in edges if e[0] == room and node_types[e[1]] == 3)
-		connections_to_cabinets = sum(1 for e in edges if e[0] == room and node_types[e[1]] == 1)
-		if verbose:
-			print(f"Room {room} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
-		owners_of_rooms[room] = [e[1] for e in edges if e[0] == room and node_types[e[1]] == 3][0]
-
-	owners_of_cabinets = {}
-
-	for cabinet in cabinets:
-		owners_of_cabinets[cabinet] = [owners_of_rooms[e[0]] for e in edges if e[1] == cabinet and node_types[e[0]] == 0][0]
-
-	holders_of_things = {}
-
-	for thing in things:
-		holders_of_things[thing] = [owners_of_cabinets[e[0]] for e in edges if e[1] == thing and node_types[e[0]] == 1][0]
-
-	mismatches = sum(1 for k in owners_of_things if owners_of_things[k] != holders_of_things[k])
-
+	mismatches = -1
 
 	if verbose:
+		things = [i for i in range(len(node_types)) if node_types[i] == 2]
+		rooms = [i for i in range(len(node_types)) if node_types[i] == 0]
+		cabinets = [i for i in range(len(node_types)) if node_types[i] == 1]
+
+
+		owners_of_things = {}
+
+		for thing in things:
+			connections_to_persons = sum(1 for e in edges if e[0] == thing and node_types[e[1]] == 3)
+			connections_to_cabinets = sum(1 for e in edges if e[1] == thing and node_types[e[0]] == 1)
+			if verbose:
+				print(f"Thing {thing} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
+			owners_of_things[thing] = [e[1] for e in edges if e[0] == thing and node_types[e[1]] == 3][0]
+		
+		owners_of_rooms = {}
+
+		for room in rooms:
+			connections_to_persons = sum(1 for e in edges if e[0] == room and node_types[e[1]] == 3)
+			connections_to_cabinets = sum(1 for e in edges if e[0] == room and node_types[e[1]] == 1)
+			if verbose:
+				print(f"Room {room} has {connections_to_persons} connections to persons and {connections_to_cabinets} connections to cabinets")
+			owners_of_rooms[room] = [e[1] for e in edges if e[0] == room and node_types[e[1]] == 3][0]
+
+		owners_of_cabinets = {}
+
+		for cabinet in cabinets:
+			owners_of_cabinets[cabinet] = [owners_of_rooms[e[0]] for e in edges if e[1] == cabinet and node_types[e[0]] == 0][0]
+
+		holders_of_things = {}
+
+		for thing in things:
+			holders_of_things[thing] = [owners_of_cabinets[e[0]] for e in edges if e[1] == thing and node_types[e[0]] == 1][0]
+
+		mismatches = sum(1 for k in owners_of_things if owners_of_things[k] != holders_of_things[k])
+
+
+	
 		print(f"Mismatches: {mismatches}")
 
 	edge_colors = ["black" if node_types[e[0]] == 2 and node_types[e[1]] == 3 else "grey" for e in edges]
@@ -241,7 +259,7 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			globals = problem.globals
 			bin_solution = problem.solution_bin
 
-			plot(g, globals["node_types"], f"input_sample_{idx}_solution.png", include_legend=False, bin_solution=bin_solution)
+			plot(g, globals["node_types"], f"input_sample_{idx}_solution.png", include_legend=False, bin_solution_edge=bin_solution)
 
 			H_graph, density, graph_size = self.igraph_to_jraph(g)
 			H_graph = H_graph._replace(globals=globals)
@@ -250,7 +268,8 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 			#Energy, boundEnergy, solution, runtime, H_graph_compl = self.solve_graph(H_graph, g)
 			Energy, boundEnergy, solution, runtime, compl_H_graph = self.solve_graph(H_graph,g)
 
-			H_graph = GraphWithMeta(graph=H_graph, meta={"rooms": problem.rooms, "cabinets": problem.cabinets, "things": problem.things, "persons": problem.persons, "id": idx})
+			H_graph = GraphWithMeta(graph=H_graph, meta={"rooms": problem.rooms, "cabinets": problem.cabinets, "things": problem.things, "persons": problem.persons, "id": idx,
+												"offset_rooms": problem.OFFSET_ROOMS, "offset_cabinets": problem.OFFSET_CABINETS, "offset_things": problem.OFFSET_THINGS, "offset_persons": problem.OFFSET_PERSONS})
 
 
 			solutions["Energies"].append(Energy + 0.0001)

@@ -3,6 +3,11 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
+ROOMS = 0
+CABINETS = 1
+THINGS = 2
+PERSONS = 3
+
 class HCPEnergyClass(BaseEnergyClass):
 
     def __init__(self, config):
@@ -23,20 +28,37 @@ class HCPEnergyClass(BaseEnergyClass):
 
         n_graph = H_graph.n_node.shape[0]
         nodes = H_graph.nodes
-        total_num_nodes = jax.tree_util.tree_leaves(nodes)[0].shape[0]
+        total_num_nodes = max(jax.tree_util.tree_leaves(nodes)[0].shape)
+        node_types = H_graph.globals["node_types"].squeeze()
+        senders = H_graph.senders.squeeze()
+        receivers = H_graph.receivers.squeeze()
+        bins = bins.squeeze()
 
-        raveled_bins = jnp.reshape(bins, (bins.shape[0], 1))
-        Energy_messages = (raveled_bins[H_graph.senders]) * (raveled_bins[H_graph.receivers])
+        edges_person_thing = ((node_types[receivers] == THINGS) & (node_types[senders] == PERSONS))
+        
+        
 
-        # print("Energy_per_graph", Energy.shape)
-        HA_per_node = - A * raveled_bins
-        HB_per_node = B * ( jax.ops.segment_sum(Energy_messages, H_graph.receivers, total_num_nodes))
+        gt_owners_of_things = jnp.full((total_num_nodes,), -1, dtype=jnp.int32).at[jnp.where(edges_person_thing, receivers, -1)].set(jnp.arange(total_num_nodes)[jnp.where(edges_person_thing, senders, -1)])
+        owners_of_rooms = jnp.full((total_num_nodes,), -1, dtype=jnp.int32).at[jnp.where((node_types == ROOMS), jnp.arange(total_num_nodes), -1)].set(bins)
+        owners_of_cabinets = jnp.full((total_num_nodes,), -1, dtype=jnp.int32).at[jnp.where((node_types == CABINETS), jnp.arange(total_num_nodes), -1)].set(owners_of_rooms[bins])
+        bins_cabinets = jnp.where((node_types == THINGS), bins + H_graph.meta["offset_cabinets"], -1)
+        owners_of_things = jnp.full((total_num_nodes,), -1, dtype=jnp.int32).at[jnp.where((node_types == THINGS), jnp.arange(total_num_nodes), -1)].set(owners_of_cabinets[bins_cabinets] + H_graph.meta["offset_persons"])
 
-        violations_per_node = 0.5*(HB_per_node + jax.ops.segment_sum(Energy_messages, H_graph.senders, total_num_nodes))
+        things_per_cabinet = jnp.zeros((H_graph.meta["cabinets"] + 1,)).at[jnp.where((node_types == THINGS), bins, -1)].add(1)[:-1]
+        cabinets_per_room = jnp.zeros((H_graph.meta["rooms"] + 1,)).at[jnp.where((node_types == CABINETS), owners_of_rooms[bins], -1)].add(1)[:-1]
 
-        Energy = jax.ops.segment_sum(HA_per_node + HB_per_node, node_gr_idx, n_graph)
-        HB_per_graph = jax.ops.segment_sum(HB_per_node, node_gr_idx, n_graph)
-        return Energy, violations_per_node, HB_per_graph
+        energy_ownerships = jax.ops.segment_sum((owners_of_things != gt_owners_of_things).astype(jnp.float32), node_gr_idx, n_graph)[..., None]
+        energy_things_per_cabinet = jnp.array([jnp.abs(things_per_cabinet - 5).sum(),  0])[..., None]
+        energy_cabinets_per_room = jnp.array([jnp.abs(cabinets_per_room - 2).sum(), 0])[..., None]
+
+        cabinets_of_things = jnp.where(node_types == THINGS, bins, -1)
+        energy_order_violations = jnp.where((cabinets_of_things[1:] != -1) & (cabinets_of_things[:-1] > cabinets_of_things[1:]), 1, 0)
+        
+        energy_order_violations = jnp.array([energy_order_violations.sum(), 0])[..., None]
+
+        Energy = energy_ownerships + energy_things_per_cabinet + energy_cabinets_per_room + energy_order_violations
+        
+        return Energy, {"energy_ownerships": energy_ownerships, "energy_order_violations": energy_order_violations, "energy_things_per_cabinet": energy_things_per_cabinet, "energy_cabinets_per_room": energy_cabinets_per_room}, Energy
 
 
     def calculate_relaxed_Energy(self, H_graph, bins, node_gr_idx, A = 1., B = 1.2):
@@ -44,5 +66,4 @@ class HCPEnergyClass(BaseEnergyClass):
 
     @partial(jax.jit, static_argnums=(0,))
     def calculate_Energy_loss(self, H_graph, logits, node_gr_idx):
-        p = jnp.exp(logits[...,1])
-        return self.calculate_Energy(H_graph, p, node_gr_idx)
+        return self.calculate_Energy(H_graph, logits, node_gr_idx)

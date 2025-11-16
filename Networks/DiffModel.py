@@ -89,8 +89,13 @@ class DiffModel(nn.Module):
 
 	@flax.linen.jit
 	def __call__(self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key):
+		node_nums_emb = self.vamp_get_sinusoidal_positional_encoding(jnp.arange(X_prev.shape[0]), 8, 128)
+
 		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node, jraph_graph_list["graphs"][0])
+		X_prev = jnp.concatenate([X_prev, node_nums_emb], axis = -1)
 		embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
+
+		embeddings = jnp.concat([embeddings, node_nums_emb], axis = -1)
 
 		bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis = -2)
 		embeddings_aranged_for_nodes = embeddings[jraph_graph_list["graphs"][0].globals["neighbours_per_node"]]
@@ -292,7 +297,8 @@ class DiffModel(nn.Module):
 		shape = shape[:-1] + (meta_graph.meta["cabinets"],)
 		p_uniform = jnp.ones(shape) / jnp.maximum(meta_graph.graph.globals["classes_per_node"], 1)[:, None, None]
 		mask = self.get_mask(meta_graph)[:, None] * 1.0
-		return jnp.log(p_uniform * mask + (1e-10 if soft else 0))
+		eps = jnp.where(soft, 1e-10, 0.0)
+		return jnp.log(p_uniform * mask + eps)
 
 	#@partial(flax.linen.jit, static_argnums=(0,-1))
 	def __get_log_prob(self, spin_log_probs, node_graph_idx, n_graph):

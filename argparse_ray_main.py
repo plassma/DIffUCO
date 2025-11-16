@@ -280,7 +280,7 @@ def run( flexible_config, overwrite = True):
         "n_random_node_features": 5,
         "relaxed": True,
 
-        "T_max": 0.05,
+        "T_max": 0.001,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
