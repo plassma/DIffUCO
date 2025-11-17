@@ -1,17 +1,14 @@
 from EnergyFunctions import HCPEnergyClass
-import jax.numpy as jnp
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import jax
-import jraph
-import jraph_utils
+import jax.numpy as jnp
 import numpy as np
-from jraph_utils import pmap_graph_list_better
 from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot
-import argparse
-
 from Data.LoadGraphDataset import SolutionDatasetLoader
+from house_config import compute_node_graph_indices, pad_energy_graph, sample_prior_state
+import argparse
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 if __name__ == "__main__":
 
@@ -31,13 +28,6 @@ if __name__ == "__main__":
     parser.add_argument("--n-basis-states", type=int, default=1, help="Minimal config knob required by SolutionDatasetLoader.")
     parser.add_argument("--sample-seed", type=int, default=0, help="Seed used when sampling from the prior.")
     args = parser.parse_args()
-
-    def _compute_node_graph_idx(graph):
-        n_node = jnp.asarray(graph.n_node)
-        n_graph = int(n_node.shape[1])
-        graph_idx = jnp.arange(n_graph)
-        total_nodes = int(jnp.sum(n_node))
-        return jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_nodes)
 
     def _build_dataset_statistics(dataloader):
         if dataloader is None:
@@ -65,17 +55,6 @@ if __name__ == "__main__":
             "min_edges": getattr(dataloader, "smallest_n_edges_energy_graph"),
             "max_edges": getattr(dataloader, "largest_n_edges_energy_graph"),
         }
-
-    def _pad_energy_graph(graph, dataset_stats):
-        return pmap_graph_list_better([graph], dataset_stats)
-
-    def _sample_prior(meta_graph, key):
-        num_classes = int(meta_graph.meta.get("cabinets", 1))
-        classes_per_node = jnp.asarray(meta_graph.graph.globals["classes_per_node"])
-        mask = (jnp.arange(num_classes)[None, :] < classes_per_node[:, None]).astype(jnp.float32)
-        probs = mask / jnp.maximum(classes_per_node, 1)[:, None]
-        logits = jnp.log(jnp.clip(probs, a_min=1e-9, a_max=1.0))
-        return jax.random.categorical(key, logits=logits).astype(jnp.float32)
 
     jax.config.update("jax_disable_jit", True)
 
@@ -107,14 +86,11 @@ if __name__ == "__main__":
     batch = next(iter(dataloader))
     graph_with_meta = batch["energy_graph"][0]
     key = jax.random.PRNGKey(args.sample_seed)
-    raw_sample = _sample_prior(graph_with_meta, key)
-    
-    padded_energy_graph = _pad_energy_graph(graph_with_meta, dataset_stats)
-    energy_graph = jax.tree_map(
-        lambda leaf: jnp.asarray(leaf) if hasattr(leaf, "shape") else leaf,
-        padded_energy_graph,
-    )
-    node_gr_idx = _compute_node_graph_idx(energy_graph)
+    raw_sample, _, key = sample_prior_state(graph_with_meta, key)
+
+    padded_energy_graph = pad_energy_graph(graph_with_meta, dataset_stats)
+    energy_graph = padded_energy_graph
+    node_gr_idx, _, _ = compute_node_graph_indices(energy_graph)
 
     total_nodes = jax.tree_util.tree_leaves(energy_graph.nodes)[0].shape[1]
     pad_amount = total_nodes - raw_sample.shape[0]
@@ -124,14 +100,15 @@ if __name__ == "__main__":
         raw_sample = jnp.pad(raw_sample, (0, pad_amount))
 
     node_types = np.array(energy_graph.globals["node_types"].squeeze())
-    plot(None, node_types[:-1], "solution_nodes.png", solution_nodes=energy_graph.globals["solution_nodes"].squeeze()[:-1])
+    plot(None, node_types[:-1], "solution_nodes.png", solution_nodes=energy_graph.globals["solution_nodes"].squeeze()[:-1], meta_graph=graph_with_meta)
 
     raw_sample = raw_sample.astype(np.int32).squeeze()
     prior_sample = np.full((total_nodes,), -1)
-    prior_sample[10:56] = raw_sample[10:56]
-    plot(None, node_types, "prior_nodes.png", solution_nodes=prior_sample)
+    #prior_sample[15:65] = raw_sample[15:65]
+    prior_sample = raw_sample[:-1]
+    plot(None, node_types, "prior_nodes.png", solution_nodes=prior_sample, meta_graph=graph_with_meta)
 
-    energy_fn.calculate_Energy(energy_graph, energy_graph.globals["solution_nodes"].squeeze(), node_gr_idx)
+    assert energy_fn.calculate_Energy(energy_graph, energy_graph.globals["solution_nodes"].squeeze(), node_gr_idx)[0].sum() == 0
     energy, violations, hb = energy_fn.calculate_Energy(energy_graph, raw_sample.astype(jnp.int32), node_gr_idx)
     print(f"Loaded dataset='{args.dataset}' mode='{args.mode}' sample={args.sample_idx}")
     print("Sampled state energy per graph:", energy)

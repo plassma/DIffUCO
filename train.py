@@ -125,7 +125,7 @@ class TrainMeanField:
 			elif("100" in self.dataset_name):
 				self.n_bernoulli_features = 100
 		elif self.problem_name == "HCP":
-			self.n_bernoulli_features = 10 # todo plassma: hardcoded for now
+			self.n_bernoulli_features = config["n_bernoulli_features"] # todo plassma: hardcoded for now
 		else:
 			self.n_bernoulli_features = 2
 
@@ -770,7 +770,7 @@ class TrainMeanField:
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode, epoch = epoch, epochs = self.epochs)
 
 			with tempfile.NamedTemporaryFile(suffix=".png") as target:
-				plot()
+				plot(None, graph_batch["graphs"][0].graph.globals["node_types"].squeeze(),target.name, solution_nodes=log_dict["X_0"][0, :, 0, 0], meta_graph=graph_batch["graphs"][0])
 				wandb.log({"random sample": wandb.Image(target.name)})
 
 

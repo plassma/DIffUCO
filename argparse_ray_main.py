@@ -280,7 +280,7 @@ def run( flexible_config, overwrite = True):
         "n_random_node_features": 5,
         "relaxed": True,
 
-        "T_max": 0.001,
+        "T_max": 0.01,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
@@ -331,13 +331,15 @@ def run( flexible_config, overwrite = True):
         "clip_value": 0.2,
         "value_weighting": 0.65
     }
-
+    
     if(overwrite):
         for key in flexible_config:
             if(key in config.keys()):
                 config[key] = flexible_config[key]
             else:
                 raise ValueError("key does not exist")
+    config["n_bernoulli_features"] = [10, 20, 30][config["use_sample"]]
+
 
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = str(args.mem_frac)
     if(args.deallocate):

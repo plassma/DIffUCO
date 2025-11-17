@@ -2,58 +2,12 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 import jax
-from .BaseTrainer import Base, repeat_along_nodes
+from .BaseTrainer import Base
+from .ppo_utils import select_time_indices
 import time
 import optax
 from utils import MovingAverages
 ### TODO use RL environments to make it possible to project solutions onto feasible solutions!
-
-vmap_repeat_along_nodes = jax.vmap(repeat_along_nodes, in_axes=(0, 0, 0))
-@partial(jax.jit, static_argnums=())
-def select_time_idxs(graph, data_buffer_dict, rand_diff_steps, rand_states, key):
-    n_graphs = data_buffer_dict["policies"].shape[-2]
-    n_nodes = data_buffer_dict["states"].shape[-3]
-    n_devices = data_buffer_dict["policies"].shape[0]
-
-    # key, subkey = jax.random.split(key)
-    # rand_diff_steps = jax.random.choice(subkey, jnp.arange(0, max_diff_steps), shape = (n_devices, n_diff_idxs, n_state_idxs))
-    # rand_states = jax.random.choice(subkey, jnp.arange(0, max_states), shape = (n_devices, n_state_idxs))
-
-    D_mat = jnp.arange(0, n_devices)[:, None, None, None]
-    graph_mat = jnp.arange(0, n_graphs)[None, None, :, None]
-    node_mat = jnp.arange(0, n_nodes)[None, None, :, None]
-
-   #print("asdasd", rand_diff_steps.shape, rand_states.shape)
-    rand_diff_steps_original = rand_diff_steps
-    rand_diff_steps = jnp.transpose(rand_diff_steps, (0, -1, -3, -2))
-    rand_states = jnp.transpose(rand_states, (0, 2,1))
-
-    rand_diff_steps_per_node = vmap_repeat_along_nodes(graph.nodes, graph.n_node, jnp.swapaxes(rand_diff_steps, 1, 2))
-    rand_diff_steps_per_node = jnp.swapaxes(rand_diff_steps_per_node, 1, 2)
-
-    out_dict = {}
-    for dict_key in data_buffer_dict.keys():
-        if(dict_key == "states" or dict_key == "actions" or dict_key == "rand_node_features"):
-            el = data_buffer_dict[dict_key][D_mat, rand_diff_steps_per_node, node_mat, rand_states[..., None, :]]
-        else:
-            el = data_buffer_dict[dict_key][D_mat, rand_diff_steps, graph_mat, rand_states[..., None, :]]
-
-        el = jnp.swapaxes(el, 2,3)
-        el = jnp.reshape(el, (el.shape[0], el.shape[1]*el.shape[2]) + el.shape[3:])
-
-        out_dict[dict_key] = el
-
-    ### TODO flatten along step and state dimension
-    rand_diff_steps_original = jnp.swapaxes(rand_diff_steps_original, -1, -2)
-    rand_diff_steps_resh = jnp.reshape(rand_diff_steps_original, (rand_diff_steps_original.shape[0], rand_diff_steps_original.shape[1], rand_diff_steps_original.shape[2]*rand_diff_steps_original.shape[3],1))
-    out_dict["time_index"] = jnp.swapaxes(rand_diff_steps_resh, 1, 2)
-
-    rand_diff_steps_per_node = jnp.swapaxes(rand_diff_steps_per_node, -1, -2)
-    rand_diff_steps_per_node = jnp.reshape(rand_diff_steps_per_node, (rand_diff_steps_per_node.shape[0], rand_diff_steps_per_node.shape[1]* rand_diff_steps_per_node.shape[2], rand_diff_steps_per_node.shape[3], 1))
-
-    out_dict["time_index_per_node"] = rand_diff_steps_per_node
-    return out_dict, key
-
 
 class PPO(Base):
     def __init__(self, config, EnergyClass, NoiseClass, model):
@@ -256,7 +210,7 @@ class PPO(Base):
                 split_split_diff_arr_list = self._split_arrays(split_diff_arr, self.n_state_batches, -2)
                 split_split_state_arr_list = self._split_arrays(split_state_arr, self.n_state_batches, -2)
                 for split_split_diff_arr, split_split_state_arr in zip(split_split_diff_arr_list, split_split_state_arr_list):
-                    #batch_dict, key = select_time_idxs(graphs["graphs"][0], RL_buffer, split_split_diff_arr, split_split_state_arr, key)
+                    #batch_dict, key = select_time_indices(graphs["graphs"][0], RL_buffer, split_split_diff_arr, split_split_state_arr, key)
                     #key, subkey = jax.random.split(key)
                     #batched_key = jax.random.split(subkey, num=len(jax.devices()))
                     #(loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
@@ -270,7 +224,7 @@ class PPO(Base):
 
     @partial(jax.jit, static_argnums=(0,))
     def loop_inner(self, params, opt_state, graphs, RL_buffer, key, split_diff_arr, split_state_arr):
-        batch_dict, key = select_time_idxs(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
+        batch_dict, key = select_time_indices(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
         (loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)

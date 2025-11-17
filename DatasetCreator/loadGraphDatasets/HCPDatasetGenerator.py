@@ -27,6 +27,7 @@ class HCProblem:
 	OFFSET_CABINETS: int = field(init=False)
 	OFFSET_THINGS: int = field(init=False)
 	OFFSET_PERSONS: int = field(init=False)
+	OFFSET_PER_NODE_TYPE: list[int] = field(init=False)
 	N_NODES: int = field(init=False)
 
 
@@ -43,6 +44,7 @@ class HCProblem:
 		self.OFFSET_THINGS = self.OFFSET_CABINETS + self.cabinets
 		self.OFFSET_PERSONS = self.OFFSET_THINGS + self.things
 		self.N_NODES = self.OFFSET_PERSONS + self.persons
+		self.OFFSET_PER_NODE_TYPE = np.array([self.OFFSET_PERSONS, self.OFFSET_ROOMS, self.OFFSET_CABINETS, -1])
 
 		self.edges_RxC = [(r + self.OFFSET_ROOMS, c + self.OFFSET_CABINETS) for r in range(self.rooms) for c in range(self.cabinets)]
 		self.edges_CxT = [(c + self.OFFSET_CABINETS, t + self.OFFSET_THINGS) for c in range(self.cabinets) for t in range(self.things)]
@@ -57,8 +59,10 @@ class HCProblem:
 		self.classes_per_node = self._initialize_classes_per_node()
 		self.solution_edges, self.solution_bin, self.solution_nodes = self._initialize_solution()
 		self.neighbours_per_node = self._init_neighbours_per_node()
+		self.nth_of_type = self._init_nth_of_type()
 
-		self.globals = {"node_types": self.node_types, "solution_bin": self.solution_bin, "classes_per_node": self.classes_per_node, "neighbours_per_node": self.neighbours_per_node, "solution_nodes": self.solution_nodes}
+		self.globals = {"node_types": self.node_types, "solution_bin": self.solution_bin, "classes_per_node": self.classes_per_node, "neighbours_per_node": self.neighbours_per_node, "solution_nodes": self.solution_nodes,
+				  "offset_per_node_type": self.OFFSET_PER_NODE_TYPE[self.node_types], "nth_of_type": self.nth_of_type}
 
 	def _init_neighbours_per_node(self) -> list[list[int]]:
 		neighbours = [to_shape([[self.OFFSET_PERSONS + p for p in range(self.persons)] for _ in range(self.rooms)], (self.rooms, self.cabinets)),
@@ -67,6 +71,14 @@ class HCProblem:
 				to_shape([self.persons * [-1]], (self.persons, self.cabinets))]
 		
 		return np.concatenate(neighbours, 0)
+	
+	def _init_nth_of_type(self) -> np.ndarray:
+		nth_of_type = np.zeros(len(self.node_types), dtype=int)
+		type_counts = {}
+		for i, node_type in enumerate(self.node_types):
+			nth_of_type[i] = type_counts.get(node_type, 0)
+			type_counts[node_type] = type_counts.get(node_type, 0) + 1
+		return nth_of_type
 
 	def _initialize_node_types(self) -> np.ndarray:
 		return np.array(
@@ -96,17 +108,17 @@ class HCProblem:
 
 		ci = 0
 		for thing in things:
-			solution_nodes[thing] = ci // 5 + self.OFFSET_CABINETS
+			solution_nodes[thing] = ci // 5
 			edges.append((cabinets[ci // 5], thing))
 			ci += 1
 		ri = 0
 		for c in cabinets:
-			solution_nodes[c] = ri // 2 + self.OFFSET_ROOMS
+			solution_nodes[c] = ri // 2 
 			edges.append((rooms[ri // 2], c))
 			ri += 1
 
 		for r, p in zip(rooms, persons):
-			solution_nodes[r] = p
+			solution_nodes[r] = p - self.OFFSET_PERSONS
 			edges.append((p, r))
 
 		edges.sort()
@@ -126,9 +138,10 @@ class HCProblem:
 	def plot(self, target, include_legend=False):
 		return plot(self.igraph, self.node_types, target, include_legend)
 	
-def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=None, solution_nodes = None, verbose=False):
+def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=None, solution_nodes = None, verbose=False, meta_graph=None):
 	if solution_nodes is not None:
-		edges = [(i, int(j)) for i, j in enumerate(solution_nodes) if int(j) != -1]
+		offset_node_types = meta_graph.globals["offset_per_node_type"].squeeze()
+		edges = [(i, int(j) + offset_node_types[i]) for i, j in enumerate(solution_nodes[:meta_graph.meta["offset_persons"]]) if int(j) != -1]
 		things = [i for i in range(len(node_types)) if node_types[i] == 2]
 		persons = [i for i in range(len(node_types)) if node_types[i] == 3]
 		for i, t in enumerate(things):

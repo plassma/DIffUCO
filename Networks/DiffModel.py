@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import flax
 import flax.linen as nn
 from functools import partial
+from house_config import prior_logits_for_graph
 
 from Networks.Modules import get_GNN_model
 from Networks.Modules.HeadModules.RLHead import global_graph_aggr
@@ -89,13 +90,15 @@ class DiffModel(nn.Module):
 
 	@flax.linen.jit
 	def __call__(self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key):
-		node_nums_emb = self.vamp_get_sinusoidal_positional_encoding(jnp.arange(X_prev.shape[0]), 8, 128)
+		#node_nums_emb = self.vamp_get_sinusoidal_positional_encoding(jnp.arange(X_prev.shape[0]), 8, 1024) # todo plassma: max position hardcoded for now
+		node_types_emb = self.vamp_get_sinusoidal_positional_encoding(jraph_graph_list["graphs"][0].globals["node_types"], 4, 5) # todo plassma: max position hardcoded for now
+		nth_of_type_emb = self.vamp_get_sinusoidal_positional_encoding(jraph_graph_list["graphs"][0].globals["nth_of_type"], 8, 512) # todo plassma: max position hardcoded for now
 
 		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node, jraph_graph_list["graphs"][0])
-		X_prev = jnp.concatenate([X_prev, node_nums_emb], axis = -1)
+		X_prev = jnp.concatenate([X_prev, node_types_emb, nth_of_type_emb], axis = -1)
 		embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
 
-		embeddings = jnp.concat([embeddings, node_nums_emb], axis = -1)
+		embeddings = jnp.concat([embeddings, node_types_emb, nth_of_type_emb], axis = -1)
 
 		bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis = -2)
 		embeddings_aranged_for_nodes = embeddings[jraph_graph_list["graphs"][0].globals["neighbours_per_node"]]
@@ -269,7 +272,6 @@ class DiffModel(nn.Module):
 	def sample_prior(self, j_graph, N_basis_states, key):
 		nodes = j_graph.nodes
 		shape = (nodes.shape[0], N_basis_states, 1)
-
 		key, subkey = jax.random.split(key)
 		log_p_uniform = self._get_prior(shape, j_graph)
 
@@ -294,11 +296,9 @@ class DiffModel(nn.Module):
 
 	@partial(flax.linen.jit, static_argnums=(0,1))
 	def _get_prior(self, shape, meta_graph, soft=False):
-		shape = shape[:-1] + (meta_graph.meta["cabinets"],)
-		p_uniform = jnp.ones(shape) / jnp.maximum(meta_graph.graph.globals["classes_per_node"], 1)[:, None, None]
-		mask = self.get_mask(meta_graph)[:, None] * 1.0
-		eps = jnp.where(soft, 1e-10, 0.0)
-		return jnp.log(p_uniform * mask + eps)
+		base_logits = prior_logits_for_graph(meta_graph, soft=soft)
+		target_shape = shape[:-1] + (base_logits.shape[-1],)
+		return jnp.broadcast_to(base_logits[:, None, :], target_shape)
 
 	#@partial(flax.linen.jit, static_argnums=(0,-1))
 	def __get_log_prob(self, spin_log_probs, node_graph_idx, n_graph):
