@@ -101,16 +101,18 @@ def calculate_capacity_counts(
     }
 
 
-def calculate_order_violations(house_arrays: Dict[str, jnp.ndarray], bins: jnp.ndarray) -> jnp.ndarray:
-    """Count ordering violations where cabinets decrease across consecutive things."""
-    node_types = house_arrays["node_types"]
-    cabinets_of_things = jnp.where(node_types == THINGS, bins.squeeze(), -1)
-    violations = jnp.where(
-        (cabinets_of_things[1:] != -1) & (cabinets_of_things[:-1] > cabinets_of_things[1:]),
-        1,
-        0,
-    )
-    return violations.sum()
+def calculate_order_violations(meta_graph, bins: jnp.ndarray) -> jnp.ndarray:
+    """Count inversions in `bins`, JIT-compatible."""
+    offset = meta_graph.meta["offset_things"]
+    n_things = meta_graph.meta["things"]
+    x = bins[offset : offset + n_things]   # shape (n,)
+    n = x.shape[0]
+
+    idx = jnp.arange(n)
+    i = idx[:, None]
+    j = idx[None, :]
+
+    return jnp.sum((i < j) & (x[:, None] > x[None, :]))
 
 
 def compute_node_graph_indices(graph) -> Tuple[jnp.ndarray, int, int]:

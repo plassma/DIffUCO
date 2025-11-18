@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import flax
 import flax.linen as nn
 from functools import partial
+from Networks.Modules.Transformer.TransformerEncoderStack import TransformerEncoderStack
 from house_config import prior_logits_for_graph
 
 from Networks.Modules import get_GNN_model
@@ -77,6 +78,15 @@ class DiffModel(nn.Module):
 			self.encode_process_decode = GNNModel(size = size, features=self.n_features_list_nodes[0],
 																 n_layers=self.n_message_passes
 																 )
+		self.feature_proj = nn.Dense(self.embedding_dim, dtype=dtype)
+		self.node_transformer = TransformerEncoderStack(
+            num_layers=4,
+            embed_dim=self.embedding_dim,
+            mlp_dim=self.embedding_dim * 4,
+            num_heads=4,
+            dropout_rate=0.2,
+            dtype=dtype,
+        )
 
 		self.HeadModel = HeadModel(n_features_list_prob=self.n_features_list_prob, dtype = dtype)
 
@@ -96,7 +106,9 @@ class DiffModel(nn.Module):
 
 		X_prev = self._add_random_nodes_and_time_index(X_prev, rand_node_features, t_idx_per_node, jraph_graph_list["graphs"][0])
 		X_prev = jnp.concatenate([X_prev, node_types_emb, nth_of_type_emb], axis = -1)
-		embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
+
+		#embeddings = self.encode_process_decode(jraph_graph_list, X_prev)
+		embeddings = embeddings = self.node_transformer(self.feature_proj(X_prev))
 
 		embeddings = jnp.concat([embeddings, node_types_emb, nth_of_type_emb], axis = -1)
 

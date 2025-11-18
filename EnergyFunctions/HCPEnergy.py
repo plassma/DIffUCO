@@ -22,17 +22,17 @@ class HCPEnergyClass(BaseEnergyClass):
         super().__init__(config)
 
     @partial(jax.jit, static_argnums=(0,))
-    def calculate_Energy(self, H_graph, bins, node_gr_idx, A=1.0, B=1.2):
+    def calculate_Energy(self, meta_graph, bins, node_gr_idx, A=1.0, B=1.2):
         """Evaluate hard constraints for the given assignment."""
         del A, B  # Unused legacy parameters kept for API compatibility.
 
-        n_graph = int(H_graph.n_node.shape[0])
+        n_graph = int(meta_graph.n_node.shape[0])
         bins = bins.squeeze()
-        house_arrays = build_house_arrays(H_graph)
+        house_arrays = build_house_arrays(meta_graph)
 
-        owner_info = calculate_owner_assignments(house_arrays, bins, H_graph.meta)
+        owner_info = calculate_owner_assignments(house_arrays, bins, meta_graph.meta)
         capacity_counts = calculate_capacity_counts(
-            house_arrays, bins, H_graph.meta, owner_info["owners_of_rooms"]
+            house_arrays, bins, meta_graph.meta, owner_info["owners_of_rooms"]
         )
 
         energy_ownerships = jax.ops.segment_sum(
@@ -47,11 +47,11 @@ class HCPEnergyClass(BaseEnergyClass):
         cabinets_penalty = jnp.abs(capacity_counts["cabinets_per_room"] - CABINETS_PER_ROOM_TARGET).sum()
         energy_cabinets_per_room = jnp.array([cabinets_penalty, 0.0], dtype=jnp.float32)[..., None]
 
-        order_violation_count = calculate_order_violations(house_arrays, bins)
+        order_violation_count = calculate_order_violations(meta_graph, bins)
         energy_order_violations = jnp.array([order_violation_count, 0.0], dtype=jnp.float32)[..., None]
 
         total_energy = (
-            energy_ownerships * 0 + energy_things_per_cabinet * 0.01 + energy_cabinets_per_room * 0 + energy_order_violations
+            energy_ownerships / meta_graph.meta["things"] + energy_things_per_cabinet / meta_graph.meta["things"] + energy_cabinets_per_room / meta_graph.meta["cabinets"]  + energy_order_violations / (meta_graph.edges.squeeze().shape[0] / 2)
         )
         breakdown = {
             "energy_ownerships": energy_ownerships,

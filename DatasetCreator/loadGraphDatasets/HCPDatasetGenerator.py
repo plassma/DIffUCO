@@ -229,7 +229,8 @@ def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=Non
 
 DUMMY_SAMPLES = [HCProblem(5, 10, 50, 5, [[p * 10 + i for i in range(10)] for p in range(5)]),
 				 HCProblem(10, 20, 100, 10, [[p * 10 + i for i in range(10)] for p in range(10)]),
-				 HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)])]
+				 HCProblem(15, 30, 150, 15, [[p * 10 + i for i in range(10)] for p in range(15)]),
+				 HCProblem(50, 100, 500, 50, [[p * 10 + i for i in range(10)] for p in range(50)])]
 
 VERTEX_LABELS = {0: "R", 1: "C", 2: "T", 3: "P", -1: "_"}
 VERTEX_COLORS = {0: "red", 1: "yellow", 2: "cyan", 3: "green", -1: "gray"}

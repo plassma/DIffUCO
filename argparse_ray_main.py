@@ -138,7 +138,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"AnnealSchedule": "linear", "use_sample": 0, "N_equil": 500,"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": None, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"AnnealSchedule": "linear", "use_sample": 2, "N_equil": 500,"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": None, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -280,7 +280,7 @@ def run( flexible_config, overwrite = True):
         "n_random_node_features": 5,
         "relaxed": True,
 
-        "T_max": 0.01,
+        "T_max": 0.0005,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
@@ -338,7 +338,7 @@ def run( flexible_config, overwrite = True):
                 config[key] = flexible_config[key]
             else:
                 raise ValueError("key does not exist")
-    config["n_bernoulli_features"] = [10, 20, 30][config["use_sample"]]
+    config["n_bernoulli_features"] = [10, 20, 30, 100][config["use_sample"]]
 
 
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = str(args.mem_frac)
