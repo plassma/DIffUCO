@@ -13,7 +13,7 @@ parser.add_argument('--IsingMode', default='RB_iid_100', choices = ["HCP_dummy",
                                                                     "TSP_random_20", "COLLAB", "IMDB-BINARY", "RB_iid_100_dummy" , "RB_iid_200", "RB_iid_100", "NxNLattice_4x4", "NxNLattice_8x8", "NxNLattice_16x16", "NxNLattice_10x10", "SpinGlassUniform_10x10", "SpinGlass_16x16", "NxNLattice_24x24", "NxNLattice_32x32"], help='Define the Training dataset')
 parser.add_argument('--graph_mode', default='normal', choices = ["normal", "TSPModel", "Transformer", "UNet"], help='Use U-Net or normal GNN, TSP model is a graph based implementation of the transformer, transformer is to be prefered')
 parser.add_argument('--train_mode', default='REINFORCE', choices = ["REINFORCE", "PPO", "Forward_KL"], help='Use U-Net or normal GNN')
-parser.add_argument('--AnnealSchedule', default='linear', choices = ["linear", "cosine", "exp"], help='Define the Annealing Schedule')
+parser.add_argument('--AnnealSchedule', default='linear', choices = ["linear", "cosine", "exp", "linear_cyclic"], help='Define the Annealing Schedule')
 parser.add_argument('--temps', default=[0.], type = float, help='Define gridsearch over Temperature', nargs = "+")
 parser.add_argument('--T_target', default=0., type = float, help='Define target temperature')
 parser.add_argument('--N_warmup', default=0, type = int, help='Define gridsearch over Number of Annealing steps')
@@ -25,10 +25,16 @@ parser.add_argument('--seed', default=[123], type = int, help='Define dataset se
 parser.add_argument('--GPUs', default=["0"], type = str, help='Define Nb', nargs = "+")
 parser.add_argument('--n_hidden_neurons', default=[64], type = int, help='number of hidden neurons', nargs = "+")
 parser.add_argument('--n_rand_nodes', default=2, type = int, help='define node embedding size')
+parser.add_argument('--node_transformer_layers', default=4, type = int, help='number of layers in the node transformer')
+parser.add_argument('--node_transformer_heads', default=4, type = int, help='number of attention heads in the node transformer')
+parser.add_argument('--node_transformer_dropout', default=0.05, type = float, help='dropout rate used inside the node transformer')
+parser.add_argument('--sample_groupwise', action='store_true', help='sample actions grouped by room/type on alternating steps')
+parser.add_argument('--no-sample_groupwise', dest='sample_groupwise', action='store_false')
+parser.add_argument('--transformer_type', default='linear', choices=["linear", "standard"], help='choose node transformer variant')
 parser.add_argument('--stop_epochs', default=10000, type = int, help='define early stopping')
 parser.add_argument('--n_diffusion_steps', default=[9], type = int, help='define number of diffusion steps', nargs = "+")
 parser.add_argument('--time_encoding', default="one_hot", type = str, help='encoding of diffusion steps')
-parser.add_argument('--noise_potential', default = ["annealed_obj"], type = str, choices = ["bernoulli", "boltzmann_noise", "diffusion", "annealed_obj", "categorical", "combined"], help='define the diffusion mode', nargs = "+")
+parser.add_argument('--noise_potential', default = ["annealed_obj"], type = str, choices = ["bernoulli", "boltzmann_noise", "diffusion", "annealed_obj", "categorical", "ordinal", "combined"], help='define the diffusion mode', nargs = "+")
 parser.add_argument('--n_basis_states', default=[10], type = int, help='number of states per graph', nargs = "+")
 parser.add_argument('--n_test_basis_states', default=8, type = int, help='number of states per graph during test time')
 parser.add_argument('--batch_size', default=[30], type = int, help='number of graphs within a batch', nargs = "+")
@@ -67,6 +73,9 @@ parser.add_argument('--sampling-temp', default=0., type = float, help='define sa
 parser.add_argument('--n_sampling_rounds', default=5, type = int, help='how often the the basis states are sampled in a loop in unbiased estimations')
 parser.add_argument('--bfloat16', action='store_true')
 parser.add_argument('--no-bfloat16', dest='bfloat16', action='store_false')
+parser.add_argument('--use-sample', default=0, type = int, help='Which HCP sample to use during training')
+parser.add_argument('--load_wandb_id', default=None, type = str, help='Define wandb id to load from checkpoint')
+parser.add_argument('--embedding_dim', default=32, type = int, help='embedding dimension')
 parser.set_defaults(bfloat16=False)
 
 parser.set_defaults(CE=False)
@@ -79,6 +88,7 @@ parser.set_defaults(deallocate=False)
 parser.set_defaults(jit=True)
 parser.set_defaults(linear_message_passing=True)
 parser.set_defaults(multi_gpu=True)
+parser.set_defaults(sample_groupwise=False)
 args = parser.parse_args()
 
 ### TODO add MaxCut
@@ -138,7 +148,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"AnnealSchedule": "linear", "use_sample": 2, "N_equil": 500,"jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": None, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -251,7 +261,12 @@ def detect_and_run_for_loops():
                                                 "lr_schedule": args.lr_schedule,
                                                 "TD_k": args.TD_k,
                                                 "clip_value": args.clip_value,
-                                                "value_weighting": args.value_weighting
+                                                "value_weighting": args.value_weighting,
+                                                "node_transformer_num_layers": args.node_transformer_layers,
+                                                "node_transformer_num_heads": args.node_transformer_heads,
+                                                "node_transformer_dropout_rate": args.node_transformer_dropout,
+                                                "sample_groupwise": args.sample_groupwise,
+                                                "transformer_type": args.transformer_type
                                             }
 
                                             run(flexible_config=flexible_config, overwrite=True)
@@ -280,11 +295,11 @@ def run( flexible_config, overwrite = True):
         "n_random_node_features": 5,
         "relaxed": True,
 
-        "T_max": 0.0005,
+        "T_max": 0.01,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
-        "stop_epochs": 800,
+        "stop_epochs": 100000,
 
         ### TODO rework network and remove edge updates
         "n_hidden_neurons": 64,
@@ -324,12 +339,31 @@ def run( flexible_config, overwrite = True):
         "n_test_basis_states": 20,
         "bfloat16": False,
         "T_target": 0.,
-        "AnnealSchedule": "linear",
-        "time_encoding": "one_hot",
+        "AnnealSchedule": "powerlaw",
+        "powerlaw_exponent": 4,
+        "time_encoding": "learned",
         "lr_schedule": "cosine",
         "TD_k": 3,
         "clip_value": 0.2,
-        "value_weighting": 0.65
+        "value_weighting": 0.65,
+        "embedding_dim": 64,
+        "node_emb_type": "learned",
+        "augment_rooms": False,
+        "node_transformer_num_layers": 2,
+        "node_transformer_num_heads": 4,
+        "node_transformer_dropout_rate": 0.0,
+        "sample_groupwise": False,
+        "transformer_type": "linear",
+        "sample_multiplier": 1,
+        "anneal_cycle_length": 200,
+        "energy_weights": {
+            "energy_ownerships": 1.0,
+            "energy_things_per_cabinet": 1.0,
+            "energy_cabinets_per_room": 1.0,
+            "energy_order_violations": 3.0,
+            "asymmetric": False,
+            "exp_cabinets_things_rooms": 2.0,
+        }
     }
     
     if(overwrite):
@@ -340,6 +374,14 @@ def run( flexible_config, overwrite = True):
                 raise ValueError("key does not exist")
     config["n_bernoulli_features"] = [10, 20, 30, 100][config["use_sample"]]
 
+    #config["T_max"] = config["T_max"] * 16 / config["n_diffusion_steps"]
+
+    config["T_max"] = config["T_max"] * 10. / config["n_bernoulli_features"]
+    config["T_target"] = config["T_target"] * 10. / config["n_bernoulli_features"]
+    #config["T_target"] = config["T_max"] * 1
+
+    #config["embedding_dim"] = [32, 32, 32, 32][config["use_sample"]]
+
 
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = str(args.mem_frac)
     if(args.deallocate):
@@ -349,7 +391,7 @@ def run( flexible_config, overwrite = True):
     # from jax import config
     # config.update("jax_enable_x64", True)
 
-    train = TrainMeanField(config)
+    train = TrainMeanField(config, load_wandb_id=config["load_wandb_id"])
 
     train.train()
 

@@ -35,6 +35,9 @@ def build_house_arrays(H_graph) -> Dict[str, jnp.ndarray]:
 def _owner_template(total_nodes: int) -> jnp.ndarray:
     return jnp.full((total_nodes,), -1, dtype=jnp.int32)
 
+def _owner_template_cont(bins: int) -> jnp.ndarray:
+    return jnp.zeros_like(bins)
+
 
 def calculate_owner_assignments(
     house_arrays: Dict[str, jnp.ndarray], bins: jnp.ndarray, meta: Dict[str, int]
@@ -47,16 +50,13 @@ def calculate_owner_assignments(
 
     bins = bins.squeeze()
 
-    person_thing_edges = (node_types[receivers] == THINGS) & (node_types[senders] == PERSONS)
+    #person_thing_edges = (node_types[receivers] == THINGS) & (node_types[senders] == PERSONS)
     total_idx = jnp.arange(total_nodes, dtype=jnp.int32)
 
-    gt_owners_of_things = _owner_template(total_nodes).at[
-        jnp.where(person_thing_edges, receivers, -1)
-    ].set(total_idx[jnp.where(person_thing_edges, senders, -1)])
-
+    gt_owners_of_things = bins[meta["offset_things_persons"] : meta["offset_things_persons"]+ meta["things"]]
     owners_of_rooms = _owner_template(total_nodes).at[
         jnp.where(node_types == ROOMS, total_idx, -1)
-    ].set(bins + meta["offset_persons"])
+    ].set(bins)
 
     owners_of_cabinets = _owner_template(total_nodes).at[
         jnp.where(node_types == CABINETS, total_idx, -1)
@@ -65,7 +65,42 @@ def calculate_owner_assignments(
     bins_cabinets = jnp.where(node_types == THINGS, bins + meta["offset_cabinets"], -1)
     owners_of_things = _owner_template(total_nodes).at[
         jnp.where(node_types == THINGS, total_idx, -1)
-    ].set(owners_of_cabinets[bins_cabinets])
+    ].set(owners_of_cabinets[bins_cabinets])[meta["offset_things_cabinets"]:meta["offset_things_cabinets"] + meta["things"]]
+
+    return {
+        "gt_owners_of_things": gt_owners_of_things,
+        "owners_of_rooms": owners_of_rooms,
+        "owners_of_cabinets": owners_of_cabinets,
+        "owners_of_things": owners_of_things,
+    }
+
+def calculate_owner_assignments_continuous(
+    house_arrays: Dict[str, jnp.ndarray], bins: jnp.ndarray, meta: Dict[str, int]
+) -> Dict[str, jnp.ndarray]:
+    """Compute ground-truth and predicted owners for rooms/cabinets/things."""
+    node_types = house_arrays["node_types"]
+    senders = house_arrays["senders"]
+    receivers = house_arrays["receivers"]
+    total_nodes = house_arrays["total_nodes"]
+
+    bins = bins.squeeze()
+
+    #person_thing_edges = (node_types[receivers] == THINGS) & (node_types[senders] == PERSONS)
+    total_idx = jnp.arange(total_nodes, dtype=jnp.int32)
+
+    gt_owners_of_things = bins[meta["offset_things_persons"] : meta["offset_things_persons"]+ meta["things"]]
+    owners_of_rooms = _owner_template_cont(bins).at[
+        jnp.where(node_types == ROOMS, total_idx, -1)
+    ].set(bins)
+
+    owners_of_cabinets = _owner_template(total_nodes).at[
+        jnp.where(node_types == CABINETS, total_idx, -1)
+    ].set(owners_of_rooms[bins])
+
+    bins_cabinets = jnp.where(node_types == THINGS, bins + meta["offset_cabinets"], -1)
+    owners_of_things = _owner_template(total_nodes).at[
+        jnp.where(node_types == THINGS, total_idx, -1)
+    ].set(owners_of_cabinets[bins_cabinets])[meta["offset_things_cabinets"]:meta["offset_things_cabinets"] + meta["things"]]
 
     return {
         "gt_owners_of_things": gt_owners_of_things,
@@ -101,14 +136,24 @@ def calculate_capacity_counts(
     }
 
 
-def calculate_order_violations(meta_graph, bins: jnp.ndarray) -> jnp.ndarray:
+def calculate_order_violations(meta_graph, bins: jnp.ndarray, what="things") -> jnp.ndarray:
     """Count inversions in `bins`, JIT-compatible."""
-    offset = meta_graph.meta["offset_things"]
-    n_things = meta_graph.meta["things"]
-    x = bins[offset : offset + n_things]   # shape (n,)
+    if what == "things":
+        offset = meta_graph.meta["offset_things_cabinets"]
+        n = meta_graph.meta["things"]
+    elif what == "cabinets":
+        offset = meta_graph.meta["offset_cabinets"]
+        n = meta_graph.meta["cabinets"]
+    elif what == "rooms":
+        offset = meta_graph.meta["offset_rooms"]
+        n = meta_graph.meta["rooms"]
+    else:
+        raise ValueError(f"What is '{what}' not recognized for order violations.")
+    x = bins[offset : offset + n]   # shape (n,)
     n = x.shape[0]
 
     idx = jnp.arange(n)
+    
     i = idx[:, None]
     j = idx[None, :]
 
@@ -138,6 +183,13 @@ def prior_logits_for_graph(meta_graph, soft: bool = False):
     probs = mask / jnp.maximum(classes_per_node, 1)[:, None]
     eps = jnp.where(soft, 1e-10, 0.0)
     min_val = eps
+
+    #fix ownership logits constant
+    start_ownerships = meta["offset_things_persons"]
+    end_ownerships = start_ownerships + meta["things"]
+    probs = probs.at[start_ownerships:end_ownerships].set(0.0)
+    rows = jnp.arange(start_ownerships, end_ownerships)
+    probs = probs.at[rows, meta_graph.globals["owners_of_things"][:meta["things"]]].set(1.0)
     return jnp.log(jnp.clip(probs * mask + eps, a_min=min_val, a_max=None))
 
 

@@ -30,8 +30,44 @@ class Base(ABC):
         self.sampling_temp = self.config["sampling_temp"]
         print("EVAL STEP FACTOR is", self.eval_step_factor)
 
-        self.vmapped_make_one_step = jax.vmap(self.model.make_one_step, in_axes=(None, None, 1, None, 0),
-                                              out_axes=(1, 0))
+        def _make_one_step_det(params, graphs, X_prev, t_idx_per_node, key, step=0):
+            return self.model.make_one_step(
+                params, graphs, X_prev, t_idx_per_node, key, deterministic=True, step=step
+            )
+
+        def _make_one_step_stoch(params, graphs, X_prev, t_idx_per_node, key, step=0):
+            return self.model.make_one_step(
+                params, graphs, X_prev, t_idx_per_node, key, deterministic=False, step=step
+            )
+        
+        def _make_one_step_force_samples(params, graphs, X_prev, X_next, t_idx_per_node, key, step=0):
+            return self.model.make_one_step_force_samples(
+                params, graphs, X_prev, X_next, t_idx_per_node, key, step=step
+            )
+        
+        self._vmapped_make_one_step_det = jax.vmap(
+            _make_one_step_det,
+            in_axes=(None, None, 1, None, 0, None),
+            out_axes=(1, 0),
+        )
+        self._vmapped_make_one_step_stoch = jax.vmap(
+            _make_one_step_stoch,
+            in_axes=(None, None, 1, None, 0, None),
+            out_axes=(1, 0),
+        )
+
+        self._vmapped_make_one_step_force_samples = jax.vmap(
+            _make_one_step_force_samples,
+            in_axes=(None, None, 1, 1, None, 0, None),
+            out_axes=(1, 0),
+        )
+
+        def _call_vmapped_make_one_step(params, graphs, X_prev, t_idx_per_node, key, deterministic=True, step=0):
+            if deterministic:
+                return self._vmapped_make_one_step_det(params, graphs, X_prev, t_idx_per_node, key, step)
+            return self._vmapped_make_one_step_stoch(params, graphs, X_prev, t_idx_per_node, key, step)
+
+        self.vmapped_make_one_step = _call_vmapped_make_one_step
         self.vmapped_sample_with_temp = jax.vmap(self.sample_with_temp, in_axes=(None, 1, None, 0), out_axes=(1, 0))
 
         self.NoiseDistrClass = NoiseClass

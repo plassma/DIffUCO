@@ -26,7 +26,11 @@
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",
+<<<<<<< Updated upstream
             "args": ["--lrs", "0.002", "--GPUs", "4", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "RB_iid_100", "--EnergyFunction", "MIS", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "annealed_obj", "--project_name", "FirstRuns", "--seed", "123", "--debug"],
+=======
+            "args": ["--lrs", "0.002", "--GPUs", "5", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "RB_iid_100", "--EnergyFunction", "MIS", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "10", "--noise_potential", "annealed_obj", "--project_name", "FirstRuns", "--seed", "123", "--debug"],
+>>>>>>> Stashed changes
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             }
@@ -36,7 +40,22 @@
             "type": "debugpy",
             "request": "launch",
             "program": "argparse_ray_main.py",
+<<<<<<< Updated upstream
             "args": ["--lrs", "0.002", "--GPUs", "2", "--n_GNN_layers", "8", "--temps", "0.6", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--n_diffusion_steps", "3", "--batch_size", "20", "--n_basis_states", "20", "--noise_potential", "annealed_obj", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--no-jit", "--n_diffusion_steps", "4", "--minib_diff_steps", "2", "--minib_basis_states", "10", "--train_mode", "PPO"],
+=======
+            "args": ["--lrs", "0.002", "--GPUs", "3", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--batch_size", "20", "--n_basis_states", "20", "--noise_potential", "ordinal", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--no-jit", "--n_diffusion_steps", "4", "--minib_diff_steps", "2", "--minib_basis_states", "10", "--train_mode", "PPO", "--use-sample", "0"],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "4"
+            },
+            "justMyCode": false
+        },
+        {
+            "name": "DiffUCO HCP jit",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "argparse_ray_main.py",
+            "args": ["--lrs", "0.002", "--GPUs", "3", "--IsingMode", "HCP_dummy", "--EnergyFunction", "HCP", "--N_anneal", "2000", "--batch_size", "20", "--n_basis_states", "20", "--noise_potential", "annealed_obj", "--project_name", "FirstRunsHCP", "--seed", "123", "--debug", "--jit", "--n_diffusion_steps", "4", "--minib_diff_steps", "2", "--minib_basis_states", "10", "--train_mode", "PPO", "--use-sample", "0"],
+>>>>>>> Stashed changes
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
             },
@@ -72,6 +91,18 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+<<<<<<< Updated upstream
         }
+=======
+        },
+        {
+            "name": "Debug HCProblem",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "HCProblem_test.py",
+            "console": "integratedTerminal"
+        },
+
+>>>>>>> Stashed changes
     ]
 }

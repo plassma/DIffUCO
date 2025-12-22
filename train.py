@@ -149,6 +149,10 @@ class TrainMeanField:
 		self.n_message_passes = self.config["n_message_passes"]
 		self.message_passing_weight_tied = self.config["message_passing_weight_tied"]
 		self.linear_message_passing = self.config["linear_message_passing"]
+		self.sample_groupwise = self.config.get("sample_groupwise", False)
+		self.config["sample_groupwise"] = self.sample_groupwise
+		self.transformer_type = self.config.get("transformer_type", "linear")
+		self.config["transformer_type"] = self.transformer_type
 
 		if("bfloat16" in self.config.keys()):
 			self.bfloat16 = self.config["bfloat16"]
@@ -239,13 +243,13 @@ class TrainMeanField:
 
 		config = self.config
 
-		self.wandb_project = f"{self.project_name}{config['mode']}_{config['dataset_name']}_{config['problem_name']}_relaxed_{config['relaxed']}_deeper"
+		self.wandb_project = f"{self.project_name}{config['mode']}_{config['dataset_name']}_{config['problem_name']}_relaxed_{config['relaxed']}_deeper" + ("_loaded" if self.load_wandb_id != None else "")
 		if config['T_max'] > 0.:
 			self.wandb_group = f"{config['seed']}_LMP_T_{config['T_max']}_noise_potential_{config['noise_potential']}_anneal_{config['N_anneal']}_MPasses_{config['n_message_passes']}"
 		else:
 			self.wandb_group = f"{config['seed']}_LMP_T_{config['T_max']}_anneal_{config['N_anneal']}_MPasses_{config['n_message_passes']}"
 
-		wandb_run = f"lr_{config['lr']}_nh_{config['n_hidden_neurons']}_time_cond_{self.time_conditioning }_n_diff_{config['n_diffusion_steps']}_deeper"
+		wandb_run = f"sample_{config['use_sample']}_emb_{config['embedding_dim']}_n_diff_{config['n_diffusion_steps']}_T_{config['T_max']:.6f}"
 
 		self.wandb_run_id = wandb.util.generate_id()
 		self.wandb_run = f"{self.load_wandb_id}_{self.wandb_run_id}_{wandb_run}"
@@ -326,6 +330,7 @@ class TrainMeanField:
 		else:
 			loaded_dict = self._load_last_epoch()
 			loaded_config = loaded_dict["config"]
+			loaded_config["N_anneal"] = max(config["N_anneal"], loaded_config.get("N_anneal", 0))
 			return loaded_config
 
 	def __init_network(self):
@@ -357,7 +362,12 @@ class TrainMeanField:
 								mean_aggr = self.mean_aggr,
 							   EncoderModel = self.graph_mode, n_random_node_features = self.n_random_node_features,
 							   train_mode = self.config["train_mode"],
-							   graph_norm = self.graph_norm, bfloat16 = self.bfloat16, dataset_name = self.dataset_name)
+							   graph_norm = self.graph_norm, bfloat16 = self.bfloat16, dataset_name = self.dataset_name, embedding_dim=self.config["embedding_dim"], node_emb_type=self.config["node_emb_type"],
+							   augment_rooms=self.config["augment_rooms"],
+							   node_transformer_num_layers=self.config.get("node_transformer_num_layers", 4),
+							   node_transformer_num_heads=self.config.get("node_transformer_num_heads", 4),
+							   node_transformer_dropout_rate=self.config.get("node_transformer_dropout_rate", 0.05),
+							   transformer_type=self.transformer_type)
 
 
 	def __init_optimizer_and_params(self):
@@ -564,6 +574,16 @@ class TrainMeanField:
 			T_curr = self.T_target
 
 		return T_curr
+	
+	def __powerlaw_annealing(self, epoch, power):
+		if epoch < self.N_warmup:
+			T_curr = self.T_max
+		elif epoch >= self.N_warmup and epoch < self.epochs - self.N_equil - 1:
+			T_curr = max([self.T_target + (self.T_max - self.T_target) * ((self.N_anneal - epoch) / self.N_anneal)**power, 0])
+		else:
+			T_curr = self.T_target
+
+		return T_curr
 
 	def __linear_annealing_reverse(self, epoch):
 		if epoch <= self.epochs:
@@ -637,6 +657,15 @@ class TrainMeanField:
 				self.T = self.__linear_annealing(epoch)
 			elif("exp" == self.AnnealSchedule):
 				self.T = self.__exp_annealing(epoch)
+			elif("powerlaw" == self.AnnealSchedule):
+				self.T = self.__powerlaw_annealing(epoch, self.config["powerlaw_exponent"])
+			elif ("linear_cyclic" == self.AnnealSchedule):
+				cycle_length = self.config["anneal_cycle_length"]
+				if epoch > self.N_warmup + self.N_anneal:
+					self.T = self.T_target
+					continue
+				cycle_epoch = epoch % cycle_length
+				self.T = self.__linear_annealing(cycle_epoch)
 			else:
 				raise ValueError("schedule not implemented")
 
@@ -661,6 +690,8 @@ class TrainMeanField:
 					log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
 					batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 						log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
+					batch_log_dict["solution_prob_mean"] = log_dict_metrics["solution_prob_mean"]
+					batch_log_dict["solution_prob_min"] = log_dict_metrics["solution_prob_min"]
 
 					### concatenate along device dim
 					energy_dict = {f"energies/{key}": log_dict["energies"][key] for key in log_dict["energies"]}
@@ -703,7 +734,7 @@ class TrainMeanField:
 			end_train_time = time.time()
 			train_time_needed = end_train_time - start_train_time
 
-			new_lr = np.mean(cos_schedule(self.opt_state[1].count, self.epoch_length * (self.N_anneal + self.N_warmup+ + self.N_equil), max_lr=self.lr, min_lr=self.lr / 10))
+			new_lr = np.mean(self.lr_func(self.opt_state[1].count, self.epoch_length * (self.N_anneal + self.N_warmup+ + self.N_equil), max_lr=self.lr, min_lr=self.lr / 10))
 
 			train_log_dict = {
 				"train/epoch": epoch,
@@ -731,10 +762,11 @@ class TrainMeanField:
 					#print("shape jsut calc the mean", np.array(wandb_log_dict[key]).shape)
 					train_log_dict["train/" + key] = np.mean(wandb_log_dict[key])
 
-			wandb.log(train_log_dict)
-			wandb.log(wandb_epoch_time_dict)
+			combined_train_log = {**train_log_dict, **wandb_epoch_time_dict}
+			wandb.log(combined_train_log, step=epoch)
 
-			self.eval(epoch=epoch + 1)
+			if (epoch + 1) % 100 == 0:
+				self.eval(epoch=epoch + 1)
 
 			if self.epochs_since_best == self.stop_epochs:
 				# early stopping
@@ -742,11 +774,27 @@ class TrainMeanField:
 				break
 		wandb.finish()
 
-	def show_graph(self, graph_batch, log_dict, target, select_sample = 0):
-		sample = log_dict["X_0"][0,select_sample,:, 0]
-		edges = [(graph_batch["graphs"][0].graph.senders[0,i], graph_batch["graphs"][0].graph.receivers[0,i]) for i,e in enumerate(sample) if e and graph_batch["graphs"][0].graph.senders[0,i] != graph_batch["graphs"][0].graph.receivers[0,i]]
-		graph = ig.Graph(edges=edges)
-		return plot_graph(graph, graph_batch["graphs"][0].graph.globals["node_types"][0], target)
+	def sample(self,N = 4000):
+		dataloader = self.dataloader_val
+		self.TrainerClass.N_test_basis_states = N
+		best_so_far = np.inf
+		for iter, (batch_dict) in enumerate(dataloader):
+			graph_batch, energy_graph_batch = self._prepare_graphs(batch_dict, mode = "eval")
+
+			self.key, subkey = jax.random.split(self.key)
+			batched_key = jax.random.split(subkey, num = len(jax.devices()))
+
+			loss, (log_dict, _) = self.TrainerClass.pmap_sample(self.params, graph_batch, energy_graph_batch, self.T, batched_key)
+
+			vals = log_dict["X_0"][0, :, :, 0]
+			log_dict["graph_batch"] = graph_batch
+			unique_solutions = np.unique(vals, axis=1)
+			energies = log_dict["metrics"]["energies"].squeeze()
+			best_so_far = min(best_so_far, energies.min())
+			print(f"Mean energy is {np.mean(energies)}, min energy is {np.min(energies)}, max energy is {np.max(energies)}, best so far is {best_so_far}")
+			print(f"Number of unique solutions is {unique_solutions.shape[0]}")
+
+		return log_dict
 
 
 	def eval(self, epoch, mode = "eval"):
@@ -771,7 +819,7 @@ class TrainMeanField:
 
 			with tempfile.NamedTemporaryFile(suffix=".png") as target:
 				plot(None, graph_batch["graphs"][0].graph.globals["node_types"].squeeze(),target.name, solution_nodes=log_dict["X_0"][0, :, 0, 0], meta_graph=graph_batch["graphs"][0])
-				wandb.log({"random sample": wandb.Image(target.name)})
+				wandb.log({"random sample": wandb.Image(target.name)}, commit=False, step=epoch)
 
 
 			log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
@@ -787,6 +835,8 @@ class TrainMeanField:
 
 			batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 				log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
+			batch_log_dict["solution_prob_mean"] = log_dict_metrics["solution_prob_mean"]
+			batch_log_dict["solution_prob_min"] = log_dict_metrics["solution_prob_min"]
 
 			for key in batch_log_dict.keys():
 				if key not in wandb_log_dict:
@@ -807,8 +857,7 @@ class TrainMeanField:
 		for key in save_metrics_at_epoch.keys():
 			self.save_metrics_dict[key].append(np.mean(np.concatenate(save_metrics_at_epoch[key], axis = 0)))
 
-
-		self.__plot_figures( log_dict)
+		self.__plot_figures(log_dict, mode=mode, step=epoch)
 		eval_log_dict = {
 			f"{mode}/epoch": epoch,
 			f"{mode}/epochs_since_best": self.epochs_since_best,
@@ -843,7 +892,7 @@ class TrainMeanField:
 
 		self.__save_params_every_epoch(epoch)
 
-		wandb.log(eval_log_dict)
+		wandb.log(eval_log_dict, step=epoch)
 
 	def test(self, mode = "test"):
 
@@ -1184,7 +1233,7 @@ class TrainMeanField:
 
 		return input_graph, energy_graph
 
-	def __plot_figures(self, log_dict, mode = "eval"):
+	def __plot_figures(self, log_dict, mode = "eval", step = None):
 		if "figures" in log_dict.keys():
 			plt_dict = {}
 			figure_dict = log_dict["figures"]
@@ -1234,7 +1283,10 @@ class TrainMeanField:
 					plt_dict[f"{mode}/figures/{figure_key}"] = wandb.Image(fig)
 					plt.close("all")
 
-			wandb.log(plt_dict)
+			if step is not None:
+				wandb.log(plt_dict, step=step, commit=False)
+			else:
+				wandb.log(plt_dict)
 
 	@partial(jax.jit, static_argnums=(0,))
 	def calc_mean_prob(self,graphs, spin_log_probs):
@@ -1273,6 +1325,7 @@ class TrainMeanField:
 		mean_gt_energy = gt_energies
 		mean_best_energy = min_energies
 		mean_best_rel_error = best_rel_error_per_graph
+		mean_best_10_percent_energy = np.mean(np.sort(energies, axis=1)[:, :max(1, int(0.1 * energies.shape[1]))], axis=1)
 		#print(rel_error, mean_best_rel_error)
 
 
@@ -1284,7 +1337,7 @@ class TrainMeanField:
 
 		log_dict = {"mean_energy": energies, "mean_normed_energy": mean_normed_energy,
 					"mean_gt_energy": mean_gt_energy, "mean_best_energy":  mean_best_energy, "rel_error": rel_error_matrix,
-					"mean_best_rel_error": mean_best_rel_error, "mean_prob": mean_prob_per_graph}
+					"mean_best_rel_error": mean_best_rel_error, "mean_prob": mean_prob_per_graph, "mean_best_10_percent_energy": mean_best_10_percent_energy,}
 
 		if self.problem_name == 'MVC':
 			APR_per_graph = np.squeeze(energies, axis=-1) / gt_energies
