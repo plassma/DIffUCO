@@ -263,13 +263,13 @@ class DiffModel(nn.Module):
 			idx = jnp.array(jraph_graph.globals["neighbours_per_node"])[jnp.arange(X_t.shape[0]), X_t[:, 0].astype(jnp.int32)]
 			X_emb = X_input[idx]
 		elif self.node_emb_type == "learned":
-			X_emb = jnp.zeros((X_t.shape[0], self.embedding_dim), dtype=dtype)
+			X_emb = jnp.zeros((X_t.shape[0], self.embedding_dim + 16), dtype=dtype)
 			slices = [slice(jraph_graph.meta["offset_rooms"], jraph_graph.meta["offset_rooms"] + jraph_graph.meta["rooms"]), 
 					  slice(jraph_graph.meta["offset_cabinets"], jraph_graph.meta["offset_cabinets"] + jraph_graph.meta["cabinets"]), 
 					  slice(jraph_graph.meta["offset_things_cabinets"], jraph_graph.meta["offset_things_cabinets"] + jraph_graph.meta["things"]), 
 					  slice(jraph_graph.meta["offset_things_persons"], jraph_graph.meta["offset_things_persons"] + jraph_graph.meta["persons"])]
 			for i in range(4):
-				X_emb = X_emb.at[slices[i]].set(self.connection_emb[i](X_t[slices[i], 0].astype(jnp.int32)))
+				X_emb = X_emb.at[slices[i]].set(jnp.concatenate([self.connection_emb[i](X_t[slices[i], 0].astype(jnp.int32)), self.vmap_get_sinusoidal_positional_encoding(X_t[slices[i], 0], 16)], axis=-1))
 		else:
 			X_emb = self.vmap_get_sinusoidal_positional_encoding(X_t[..., 0], self.embedding_dim)
 

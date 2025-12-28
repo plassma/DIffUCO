@@ -76,6 +76,7 @@ parser.add_argument('--no-bfloat16', dest='bfloat16', action='store_false')
 parser.add_argument('--use-sample', default=0, type = int, help='Which HCP sample to use during training')
 parser.add_argument('--load_wandb_id', default=None, type = str, help='Define wandb id to load from checkpoint')
 parser.add_argument('--embedding_dim', default=32, type = int, help='embedding dimension')
+parser.add_argument('--load-only-params', action='store_true', help='whether to only load params from wandb checkpoint', default=False)
 parser.set_defaults(bfloat16=False)
 
 parser.set_defaults(CE=False)
@@ -148,7 +149,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"load_only_params": args.load_only_params, "node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -278,6 +279,7 @@ def run( flexible_config, overwrite = True):
 
     config = {
         "load_wandb_id": None,
+        "load_only_params": False,
         "use_sample": 0,
         "n_graphs": 1,
         "mode": "Diffusion",  # either Diffusion or MeanField
@@ -287,7 +289,8 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 1e-4,
+        "lr": 5e-5,
+        "min_lr": 2.5e-5,
         "batch_size": 30, # H
         "N_basis_states": 1000, # n_s
 
@@ -354,7 +357,7 @@ def run( flexible_config, overwrite = True):
         "node_transformer_dropout_rate": 0.0,
         "sample_groupwise": False,
         "transformer_type": "linear",
-        "sample_multiplier": 1,
+        "sample_multiplier": 10,
         "anneal_cycle_length": 200,
         "energy_weights": {
             "energy_ownerships": 1.0,

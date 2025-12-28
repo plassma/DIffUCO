@@ -84,6 +84,7 @@ class TrainMeanField:
 		self.config["epochs"] = self.epochs
 
 		self.lr = self.config["lr"]
+		self.min_lr = self.config.get("min_lr", self.lr/3)
 		self.N_basis_states = self.config["N_basis_states"]
 
 		if("AnnealSchedule" not in self.config.keys()):
@@ -321,11 +322,11 @@ class TrainMeanField:
 			loaded_tuple = pickle.load( f)
 
 		params = loaded_tuple[0]
-		config = loaded_tuple[1]
+		config = loaded_tuple[1] if not self.config["load_only_params"] else self.config
 		return params, config
 
 	def _init_config(self, config):
-		if(self.load_wandb_id == None):
+		if(self.load_wandb_id == None or config["load_only_params"]):
 			return config
 		else:
 			loaded_dict = self._load_last_epoch()
@@ -397,7 +398,7 @@ class TrainMeanField:
 					loaded_dict = self._load_last_epoch()
 
 			print("loaded dict", self.load_best_parameters, loaded_dict.keys())
-			self.curr_epoch = loaded_dict["epoch"]
+			self.curr_epoch = loaded_dict["epoch"] if not self.config["load_only_params"] else 0
 			self.params = loaded_dict["params"]
 
 			self.__init_optimizer(self.lr, self.params)
@@ -424,7 +425,7 @@ class TrainMeanField:
 		self.lr_func = lr_func
 		if(self.config["grad_clip"]):
 			opt = optax.chain(optax.clip_by_global_norm(1.0), optax.scale_by_radam(),
-										 optax.scale_by_schedule(lambda step: -lr_func(step, self.epoch_length*(self.N_anneal + self.N_warmup + self.N_equil), max_lr=lr, min_lr = lr/10)))
+										 optax.scale_by_schedule(lambda step: -lr_func(step, self.epoch_length*(self.N_anneal + self.N_warmup + self.N_equil), max_lr=lr, min_lr = self.min_lr)))
 			opt_init, self.opt_update = opt
 
 		else:
@@ -436,9 +437,9 @@ class TrainMeanField:
 			# opt_init = optimizer.init
 
 			opt_init, self.opt_update = optax.chain( optax.scale_by_radam(),
-										 optax.scale_by_schedule(lambda step: -lr_func(step, self.epoch_length*(self.N_anneal + self.N_warmup + self.N_equil), max_lr=lr, min_lr = lr/10)))
+										 optax.scale_by_schedule(lambda step: -lr_func(step, self.epoch_length*(self.N_anneal + self.N_warmup + self.N_equil), max_lr=lr, min_lr = self.min_lr)))
 
-		if(self.load_wandb_id == None):
+		if(self.load_wandb_id == None or self.config["load_only_params"]):
 			self.opt_state = jax.pmap(opt_init)(params)
 
 		else:
@@ -734,7 +735,7 @@ class TrainMeanField:
 			end_train_time = time.time()
 			train_time_needed = end_train_time - start_train_time
 
-			new_lr = np.mean(self.lr_func(self.opt_state[1].count, self.epoch_length * (self.N_anneal + self.N_warmup+ + self.N_equil), max_lr=self.lr, min_lr=self.lr / 10))
+			new_lr = np.mean(self.lr_func(self.opt_state[1].count, self.epoch_length * (self.N_anneal + self.N_warmup+ + self.N_equil), max_lr=self.lr, min_lr=self.min_lr))
 
 			train_log_dict = {
 				"train/epoch": epoch,
