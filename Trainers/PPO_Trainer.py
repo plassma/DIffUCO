@@ -119,19 +119,78 @@ class PPO(Base):
         return databuffer
     
     def merge_databuffers(self, A: dict, B: dict, shuffle=False, key=None):
-        for k in ["actions", "policies", "rewards", "states", "values", "energy_rewards", "bin_sequence"]:
-            A[k] = jnp.concatenate([A[k], B[k]], axis=3 if k!="energy_rewards" else 2)
-        
+        # Use the size of the sample axis (basis states) as weight
+        sample_size_A = int(A["RL"]["energy_rewards"].shape[-1])
+        sample_size_B = int(B["RL"]["energy_rewards"].shape[-1])
+        total_samples = sample_size_A + sample_size_B
+        sample_dims = {sample_size_A, sample_size_B}
+
+        def _weighted_average(a, b):
+            return (a * sample_size_A + b * sample_size_B) / total_samples
+
+        def _find_sample_axis(a_shape, b_shape):
+            if len(a_shape) != len(b_shape):
+                return None
+            candidate_axes = []
+            for idx, (dim_a, dim_b) in enumerate(zip(a_shape, b_shape)):
+                if (dim_a in sample_dims or dim_b in sample_dims) and all(
+                        a_shape[j] == b_shape[j] for j in range(len(a_shape)) if j != idx):
+                    candidate_axes.append(idx)
+            return candidate_axes[-1] if candidate_axes else None
+
+        def _merge_value(a, b):
+            if isinstance(a, dict) and isinstance(b, dict):
+                merged_dict = {}
+                for k in set(a.keys()).union(b.keys()):
+                    if k in a and k in b:
+                        merged_dict[k] = _merge_value(a[k], b[k])
+                    elif k in a:
+                        merged_dict[k] = a[k]
+                    else:
+                        merged_dict[k] = b[k]
+                return merged_dict
+
+            if hasattr(a, "shape") and hasattr(b, "shape"):
+                sample_axis = _find_sample_axis(a.shape, b.shape)
+                if sample_axis is not None:
+                    return jnp.concatenate([a, b], axis=sample_axis)
+                if a.shape == b.shape:
+                    try:
+                        return _weighted_average(a, b)
+                    except Exception:
+                        return a
+                try:
+                    return _weighted_average(jnp.asarray(a), jnp.asarray(b))
+                except Exception:
+                    return a
+
+            try:
+                return _weighted_average(jnp.asarray(a), jnp.asarray(b))
+            except Exception:
+                return b
+
+        merged = _merge_value(A, B)
+
         if shuffle:
-            # Get permutation indices
-            n_samples = A["actions"].shape[3]
+            n_samples = merged["RL"]["energy_rewards"].shape[-1]
             perm_indices = jax.random.permutation(key, n_samples)
-            
-            # Apply same permutation to all keys
-            for k in ["actions", "policies", "rewards", "states", "values", "energy_rewards", "bin_sequence"]:
-                A[k] = jnp.take(A[k], perm_indices, axis=3 if k!="energy_rewards" else 2)
-        
-        return A
+
+            def _find_axis_with_dim(shape, dim):
+                axes = [i for i, d in enumerate(shape) if d == dim]
+                return axes[-1] if axes else None
+
+            def _shuffle(value):
+                if isinstance(value, dict):
+                    return {k: _shuffle(v) for k, v in value.items()}
+                if hasattr(value, "shape"):
+                    axis = _find_axis_with_dim(value.shape, n_samples)
+                    if axis is not None and value.ndim > 1:
+                        return jnp.take(value, perm_indices, axis=axis)
+                return value
+
+            merged = _shuffle(merged)
+
+        return merged
 
     def train_step(self, params, opt_state, graphs, energy_graph_batch, T, key):
 
@@ -148,7 +207,7 @@ class PPO(Base):
                 out_dict = temp_out_dict
             else:
                 key, subkey = jax.random.split(key)
-                out_dict["RL"] = self.merge_databuffers(out_dict["RL"], temp_out_dict["RL"], shuffle=i == self.sample_multiplier - 1, key=subkey)
+                out_dict = self.merge_databuffers(out_dict, temp_out_dict, shuffle=False and i == self.sample_multiplier - 1, key=subkey)
         
         # out_dict["RL"] = self.sort_databuffer_by_value(out_dict["RL"], keep_top=self.N_basis_states, shuffle=True, key=subkey)
         
@@ -158,12 +217,12 @@ class PPO(Base):
         #aug_trajectories = trajectories.astype(jnp.int32)#aug_solution_jax(trajectories, permutations, graphs["graphs"][0])
         #out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, aug_trajectories, T, batched_key,)
         
-        if self.best_buffer is not None:
-            trajectories = self.best_buffer["bin_sequence"].astype(jnp.int32)
-            best_out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, trajectories, T, batched_key,)
-            best_out_dict["RL"]["bin_sequence"] = best_out_dict["bin_sequence"]
-            key, subkey = jax.random.split(key)
-            out_dict["RL"] = self.merge_databuffers(out_dict["RL"], best_out_dict["RL"], shuffle=True, key=subkey)
+        #if self.best_buffer is not None:
+        #    trajectories = self.best_buffer["bin_sequence"].astype(jnp.int32)
+        #    best_out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, trajectories, T, batched_key,)
+        #    best_out_dict["RL"]["bin_sequence"] = best_out_dict["bin_sequence"]
+        #    key, subkey = jax.random.split(key)
+        #    out_dict = self.merge_databuffers(out_dict, best_out_dict, shuffle=True, key=subkey)
         #self.best_buffer = self.sort_databuffer_by_value(out_dict["RL"], keep_top=int(self.N_basis_states * 0.3), shuffle=False)
 
         del out_dict["RL"]["energy_rewards"]
@@ -292,7 +351,7 @@ class PPO(Base):
         return (loss, (log_dict, key)), params, opt_state
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    #@partial(jax.jit, static_argnums=(0,))
     def loop_inner(self, params, opt_state, graphs, RL_buffer, key, split_diff_arr, split_state_arr):
         batch_dict, key = select_time_indices(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
         key, subkey = jax.random.split(key)
@@ -312,6 +371,8 @@ class PPO(Base):
         node_gr_idx = scan_dict["node_gr_idx"]
         energy_graph_batch = scan_dict["energy_graph_batch"]
 
+        energy_per_node = jnp.zeros(X_prev.shape[:-1]) #self.vmapped_relaxed_energy(energy_graph_batch, X_prev, node_gr_idx)[2] # (116, 20, 1)
+
         model_step_idx = jnp.array([i / self.eval_step_factor], dtype=jnp.int16)
         model_step_idx_per_node = model_step_idx[0] * jnp.ones((energy_graph_batch.nodes.shape[0], 1), dtype=jnp.int16)
 
@@ -326,6 +387,7 @@ class PPO(Base):
                 graphs,
                 X_prev,
                 X_next,
+                energy_per_node,
                 model_step_idx_per_node,
                 batched_key,
                 scan_dict["step"],
@@ -335,6 +397,7 @@ class PPO(Base):
                 params,
                 graphs,
                 X_prev,
+                energy_per_node,
                 model_step_idx_per_node,
                 batched_key,
                 deterministic,
@@ -704,6 +767,9 @@ class PPO(Base):
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=Sb_Hb_Nb_A_k.shape[0])
 
+        node_gr_idx, n_graph, total_num_nodes = self._compute_aggr_utils(jraph_graph_list["graphs"][0])
+        #energy_per_node = self.vmapped_relaxed_energy(jraph_graph_list["graphs"][0], Sb_Hb_Nb_X_prev.swapaxes(0,1).astype(jnp.int32), node_gr_idx)[2]
+        #out_dict, _ = self.vmapped_calc_log_q(params, jraph_graph_list, Sb_Hb_Nb_X_prev, energy_per_node.T, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
         out_dict, _ = self.vmapped_calc_log_q(params, jraph_graph_list, Sb_Hb_Nb_X_prev, Sb_Hb_Nb_rand_node_features, Sb_Hb_Nb_X_next, Sb_Nb_t_idx_per_node, batched_key)
 
         out_values = out_dict["Values"]

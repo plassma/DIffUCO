@@ -47,32 +47,31 @@ class HCPEnergyClass(BaseEnergyClass):
 
         exp_cabinets_things_rooms = self.energy_weights.get("exp_cabinets_things_rooms", 2)
 
-        if self.energy_weights["asymmetric"]:
-            energy_ownerships = jnp.array([((owner_info["owners_of_things"] != owner_info["gt_owners_of_things"]) * (owner_info["gt_owners_of_things"] + 1)).sum() * 2 / meta_graph.meta["persons"], 0]).astype(jnp.float32)[..., None]
-        else:
-            energy_ownerships = jnp.array([(owner_info["owners_of_things"] != owner_info["gt_owners_of_things"]).sum(), 0]).astype(jnp.float32)[..., None]
+        
+        energy_ownerships = jnp.array([(owner_info["owners_of_things"] != owner_info["gt_owners_of_things"]).sum(), 0]).astype(jnp.float32)[..., None]
 
-        if self.energy_weights["asymmetric"]:
-            things_penalty = jnp.abs((capacity_counts["things_per_cabinet"] - THINGS_PER_CABINET_TARGET) * jnp.arange(meta_graph.meta["cabinets"]) * 2 / meta_graph.meta["cabinets"]).sum() #jnp.abs((capacity_counts["things_per_cabinet"] - THINGS_PER_CABINET_TARGET)).sum()
-        else:
-            things_penalty = jnp.abs((capacity_counts["things_per_cabinet"] - THINGS_PER_CABINET_TARGET) ** exp_cabinets_things_rooms).sum()
+        violations_per_cabinet = jnp.abs((capacity_counts["things_per_cabinet"] - THINGS_PER_CABINET_TARGET) ** exp_cabinets_things_rooms)
+        things_penalty = violations_per_cabinet.sum()
 
         energy_things_per_cabinet = jnp.array([things_penalty, 0.0], dtype=jnp.float32)[..., None]
 
-        if self.energy_weights["asymmetric"]:
-            cabinets_penalty = jnp.abs((capacity_counts["cabinets_per_room"] - CABINETS_PER_ROOM_TARGET) * jnp.arange(meta_graph.meta["rooms"]) * 2 / meta_graph.meta["rooms"]).sum() #jnp.abs((capacity_counts["cabinets_per_room"] - CABINETS_PER_ROOM_TARGET)).sum()
-        else:
-            cabinets_penalty = jnp.abs((capacity_counts["cabinets_per_room"] - CABINETS_PER_ROOM_TARGET) ** exp_cabinets_things_rooms).sum()
+        violations_per_room = jnp.abs((capacity_counts["cabinets_per_room"] - CABINETS_PER_ROOM_TARGET) ** exp_cabinets_things_rooms)
+        cabinets_penalty = violations_per_room.sum()
         energy_cabinets_per_room = jnp.array([cabinets_penalty, 0.0], dtype=jnp.float32)[..., None]
 
         order_violations_things = calculate_order_violations(meta_graph, bins, "things")
-        energy_order_violations_things = jnp.array([order_violations_things, 0.0], dtype=jnp.float32)[..., None]
+        energy_order_violations_things = jnp.array([order_violations_things.sum(), 0.0], dtype=jnp.float32)[..., None]
 
         order_violations_cabinets = calculate_order_violations(meta_graph, bins, "cabinets")
-        energy_order_violations_cabinets = jnp.array([order_violations_cabinets, 0.0], dtype=jnp.float32)[..., None]
+        energy_order_violations_cabinets = jnp.array([order_violations_cabinets.sum(), 0.0], dtype=jnp.float32)[..., None]
 
         order_violations_rooms = calculate_order_violations(meta_graph, bins, "rooms")
-        energy_order_violations_rooms = jnp.array([order_violations_rooms, 0.0], dtype=jnp.float32)[..., None]
+        energy_order_violations_rooms = jnp.array([order_violations_rooms.sum(), 0.0], dtype=jnp.float32)[..., None]
+
+        energy_per_node = jnp.pad(
+            jnp.concat([violations_per_room, violations_per_cabinet, order_violations_things.sum(0)], axis=0),
+            (0, max(0, bins.size - jnp.concat([violations_per_room, violations_per_cabinet, order_violations_things.sum(0)], axis=0).size))
+        ).astype(jnp.float32)
 
         total_energy = (
             self.energy_weights["energy_ownerships"] * energy_ownerships / meta_graph.meta["things"] + 
@@ -92,7 +91,7 @@ class HCPEnergyClass(BaseEnergyClass):
             "weighted_cabinets_per_room": self.energy_weights["energy_cabinets_per_room"] * energy_cabinets_per_room / meta_graph.meta["cabinets"] ,
             "weighted_order_violations": self.energy_weights["energy_order_violations"] * energy_order_violations_things / expected_num_inversions(meta_graph.meta["things"]),
         }
-        return total_energy, breakdown, total_energy
+        return total_energy, breakdown, energy_per_node
 
     def calculate_relaxed_Energy(self, H_graph, bins, node_gr_idx, A=1.0, B=1.2):
         return self.calculate_Energy(H_graph, bins, node_gr_idx, A=A, B=B)

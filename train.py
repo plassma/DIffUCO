@@ -100,12 +100,19 @@ class TrainMeanField:
 			self.lr_schedule = self.config["lr_schedule"]
 
 		self.batch_size = self.config["batch_size"]
-		self.random_node_features = self.config["random_node_features"]
-		self.n_random_node_features = self.config["n_random_node_features"]
+		self.energy_per_node_dim = 1#self.config["n_random_node_features"]
 
 		self.relaxed = self.config["relaxed"]
 
 		self.T_max = self.config["T_max"]
+		self.T_explore = self.config.get("T_explore", None)
+		if self.T_explore is None:
+			self.T_explore = self.T_max
+		self.config["T_explore"] = self.T_explore
+		self.anneal_explore_period = self.config.get("anneal_explore_period", self.config.get("anneal_explore", 0))
+		self.explore_fraction = self.config.get("explore_fraction", 0.0)
+		self.config["anneal_explore_period"] = self.anneal_explore_period
+		self.config["explore_fraction"] = self.explore_fraction
 		self.T = self.T_max
 		self.N_warmup = self.config["N_warmup"]
 		self.N_anneal = self.config["N_anneal"]
@@ -361,7 +368,7 @@ class TrainMeanField:
 								problem_type = self.problem_name,
 								n_bernoulli_features = self.n_bernoulli_features,
 								mean_aggr = self.mean_aggr,
-							   EncoderModel = self.graph_mode, n_random_node_features = self.n_random_node_features,
+							   EncoderModel = self.graph_mode, dim_energy_per_node = self.energy_per_node_dim,
 							   train_mode = self.config["train_mode"],
 							   graph_norm = self.graph_norm, bfloat16 = self.bfloat16, dataset_name = self.dataset_name, embedding_dim=self.config["embedding_dim"], node_emb_type=self.config["node_emb_type"],
 							   augment_rooms=self.config["augment_rooms"],
@@ -475,12 +482,11 @@ class TrainMeanField:
 
 			batched_graph = input_graph_list["graphs"][0]
 			X_prev = jnp.ones((batched_graph.nodes.shape[1], 1))
-			rand_node_features = jnp.ones((batched_graph.nodes.shape[1], self.n_random_node_features))
+			energy_per_node_dim = jnp.ones((batched_graph.nodes.shape[1], self.energy_per_node_dim))
 
 			input_graph_list = {"graphs": [jax.tree_util.tree_map(lambda x: x[0], input_graph_list["graphs"][0])]}
 			t_idx_per_node = jnp.ones((batched_graph.nodes.shape[1],1))
-			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, rand_node_features, t_idx_per_node, subkey)
-
+			self.params = self.model.init({"params": subkey}, input_graph_list, X_prev, energy_per_node_dim, t_idx_per_node, subkey)
 		elif(self.graph_mode == "U_net"):
 			reps = 10
 			iters = len(self.dataloader_train)*reps
@@ -494,7 +500,7 @@ class TrainMeanField:
 			#node_features = self.n_diffusion_steps + self.n_random_node_features + self.n_bernoulli_features
 
 			X_prev = jnp.ones((U_net_graph_dict["graphs"][0].nodes.shape[0], 1))
-			rand_node_features = jnp.ones((U_net_graph_dict["graphs"][0].nodes.shape[0], self.n_random_node_features))
+			rand_node_features = jnp.ones((U_net_graph_dict["graphs"][0].nodes.shape[0], self.energy_per_node_dim))
 			self.params = self.model.init({"params": subkey}, U_net_graph_dict, X_prev,rand_node_features, 0, subkey)
 			# X_prev = jnp.ones(batched_U_net_graph_dict["graphs"][0].nodes.shape[:-1] +(node_features,))
 			# self.model.apply(self.params, batched_U_net_graph_dict, X_prev)
@@ -591,6 +597,40 @@ class TrainMeanField:
 			T_curr = max([self.T_max + epoch / self.N_warmup, 0])
 		return T_curr
 
+	def _temperature_from_schedule(self, epoch):
+		if ("linear" == self.AnnealSchedule):
+			return self.__linear_annealing(epoch), False
+		elif ("exp" == self.AnnealSchedule):
+			return self.__exp_annealing(epoch), False
+		elif ("powerlaw" == self.AnnealSchedule):
+			return self.__powerlaw_annealing(epoch, self.config["powerlaw_exponent"]), False
+		elif ("linear_cyclic" == self.AnnealSchedule):
+			cycle_length = self.config["anneal_cycle_length"]
+			if epoch > self.N_warmup + self.N_anneal:
+				return self.T_target, True
+			cycle_epoch = epoch % cycle_length
+			return self.__linear_annealing(cycle_epoch), False
+		else:
+			raise ValueError("schedule not implemented")
+
+	def _apply_exploration_temperature(self, epoch, base_temperature):
+		"""
+		Raise temperature to T_explore for the first explore_fraction of each anneal_explore_period.
+		"""
+		if self.anneal_explore_period <= 0 or self.explore_fraction <= 0:
+			return base_temperature
+		explore_steps = max(1, int(np.ceil(self.anneal_explore_period * self.explore_fraction)))
+		explore_steps = min(explore_steps, self.anneal_explore_period)
+		if (epoch % self.anneal_explore_period) < explore_steps:
+			return self.T_explore
+		return base_temperature
+
+	def _calculate_temperature(self, epoch):
+		base_temperature, skip_epoch = self._temperature_from_schedule(epoch)
+		if skip_epoch:
+			return base_temperature, True
+		return self._apply_exploration_temperature(epoch, base_temperature), False
+
 	def _update_MCMCBuffer_sample(self, graph_batch, energy_graph_batch, bin_sequence, batched_key, T):
 		best_MCMC_dict, MCMC_Energy, key = self.MCMCSamplerClass.update_buffer(self.params, graph_batch, energy_graph_batch, bin_sequence,
 											batched_key, T, n_steps=self.MCMC_steps)
@@ -654,21 +694,9 @@ class TrainMeanField:
 			print("epoch", epoch, "in", self.epochs)
 			start_train_time = time.time()
 
-			if("linear" == self.AnnealSchedule):
-				self.T = self.__linear_annealing(epoch)
-			elif("exp" == self.AnnealSchedule):
-				self.T = self.__exp_annealing(epoch)
-			elif("powerlaw" == self.AnnealSchedule):
-				self.T = self.__powerlaw_annealing(epoch, self.config["powerlaw_exponent"])
-			elif ("linear_cyclic" == self.AnnealSchedule):
-				cycle_length = self.config["anneal_cycle_length"]
-				if epoch > self.N_warmup + self.N_anneal:
-					self.T = self.T_target
-					continue
-				cycle_epoch = epoch % cycle_length
-				self.T = self.__linear_annealing(cycle_epoch)
-			else:
-				raise ValueError("schedule not implemented")
+			self.T, skip_epoch = self._calculate_temperature(epoch)
+			if skip_epoch:
+				continue
 
 			### TODO move code that updates MCMC buffer to this palce and update the MCMC buffer for a larger batchsize
 			step4 = time.time()
@@ -819,7 +847,7 @@ class TrainMeanField:
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode, epoch = epoch, epochs = self.epochs)
 
 			with tempfile.NamedTemporaryFile(suffix=".png") as target:
-				plot(None, graph_batch["graphs"][0].graph.globals["node_types"].squeeze(),target.name, solution_nodes=log_dict["X_0"][0, :, 0, 0], meta_graph=graph_batch["graphs"][0])
+				plot(None, graph_batch["graphs"][0].graph.globals["node_types"][0],target.name, solution_nodes=log_dict["X_0"][0, :, 0, 0], meta_graph=graph_batch["graphs"][0])
 				wandb.log({"random sample": wandb.Image(target.name)}, commit=False, step=epoch)
 
 

@@ -1,10 +1,53 @@
 import jraph
 import jax.numpy as jnp
 import numpy as np
+import itertools
 import jax
 import time
 
 from GraphWithMeta import GraphWithMeta
+
+
+def _ensure_list(graphs):
+    if isinstance(graphs, (list, tuple)):
+        return list(graphs)
+    return [graphs]
+
+
+def _repeat_graphs_for_devices(graph_list, n_devices):
+    graph_list = _ensure_list(graph_list)
+    if len(graph_list) == 0:
+        raise ValueError("graph_list must contain at least one element.")
+
+    target_len = int(np.ceil(len(graph_list) / n_devices) * n_devices)
+    target_len = max(target_len, n_devices)
+    if len(graph_list) < target_len:
+        graph_list = list(itertools.islice(itertools.cycle(graph_list), target_len))
+    n_graphs_per_device = target_len // n_devices
+    return graph_list, n_graphs_per_device
+
+
+def _meta_value_equal(lhs, rhs):
+    lhs_arr = np.asarray(lhs)
+    rhs_arr = np.asarray(rhs)
+    if lhs_arr.shape == () and rhs_arr.shape == ():
+        return bool(lhs_arr == rhs_arr)
+    return np.array_equal(lhs_arr, rhs_arr)
+
+
+def _meta_dict_equal(lhs, rhs):
+    if lhs.keys() != rhs.keys():
+        return False
+    return all(_meta_value_equal(lhs[k], rhs[k]) for k in lhs.keys())
+
+
+def _merge_meta(meta_list):
+    base_meta = dict(meta_list[0])
+    if not all(_meta_dict_equal(base_meta, meta) for meta in meta_list[1:]):
+        base_meta = dict(meta_list[0])
+    base_meta["n_graphs"] = len(meta_list)
+    base_meta.update({f"{k}_concat": [meta[k] for meta in meta_list] for k in meta_list[0].keys()})
+    return base_meta
 
 
 def pad_with_graphs(graph: jraph.GraphsTuple,
@@ -213,11 +256,7 @@ def device_batch(graph_generator, np_ = np):
 
 def pmap_transformer_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs, return_size = False, double_edges = True):
     n_devices = jax.local_device_count()
-    n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
-    # if (len(jraph_graph_list) % n_devices != 0):
-    #     print("batchsize", len(jraph_graph_list))
-    #     print("n_devices", n_devices)
-    #     raise ValueError("batchisze must be devisible by number of devices")
+    jraph_graph_list, n_graphs_per_device = _repeat_graphs_for_devices(jraph_graph_list, n_devices)
     device_batched_graphs = [jraph.batch_np(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device] )
                              for idx in range(n_devices)] ### TODO move this to collate function
 
@@ -232,11 +271,8 @@ def pmap_transformer_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs,
 
 def pmap_graph_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs, return_size = False, double_edges = True):
     n_devices = jax.local_device_count()
-    n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
-    # if (len(jraph_graph_list) % n_devices != 0):
-    #     print("batchsize", len(jraph_graph_list))
-    #     print("n_devices", n_devices)
-    #     raise ValueError("batchisze must be devisible by number of devices")
+    jraph_graph_list, n_graphs_per_device = _repeat_graphs_for_devices(jraph_graph_list, n_devices)
+
     device_batched_graphs = [jraph.batch_np(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device])
                              for idx in range(n_devices)] ### TODO move this to collate function
 
@@ -253,17 +289,19 @@ def pmap_graph_list(jraph_graph_list, k = 1.2, pad_func = pad_with_graphs, retur
 
 def pmap_graph_list_better(maybe_meta_graph_list, dataset_statistics_dict, pad_func = pad_with_graphs, return_size = False):
     is_meta = False
+    n_devices = jax.local_device_count()
+    maybe_meta_graph_list = _ensure_list(maybe_meta_graph_list)
     if isinstance(maybe_meta_graph_list[0], GraphWithMeta):
-        jraph_graph_list = [el.graph for el in maybe_meta_graph_list]
         is_meta = True
+
+    maybe_meta_graph_list, n_graphs_per_device = _repeat_graphs_for_devices(maybe_meta_graph_list, n_devices)
+
+    if is_meta:
+        meta_list = [el.meta for el in maybe_meta_graph_list]
+        jraph_graph_list = [el.graph for el in maybe_meta_graph_list]
     else:
         jraph_graph_list = maybe_meta_graph_list
-    n_devices = jax.local_device_count()
-    n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
-    # if (len(jraph_graph_list) % n_devices != 0):
-    #     print("batchsize", len(jraph_graph_list))
-    #     print("n_devices", n_devices)
-    #     raise ValueError("batchisze must be devisible by number of devices")
+    
     device_batched_graphs = [jraph.batch_np(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device])
                              for idx in range(n_devices)] ### TODO move this to collate function
 
@@ -274,8 +312,7 @@ def pmap_graph_list_better(maybe_meta_graph_list, dataset_statistics_dict, pad_f
     # print("pad graphs", step3-step2)
     # print("next generator", step4-step3)
     if is_meta:
-        meta = {k: sum(s.meta[k] for s in maybe_meta_graph_list) for k in maybe_meta_graph_list[0].meta}
-        meta |= {k + "_concat": [s.meta[k]] for s in maybe_meta_graph_list for k in maybe_meta_graph_list[0].meta}
+        meta = _merge_meta(meta_list)
         device_batched_graphs = GraphWithMeta(graph=device_batched_graphs, meta=meta)
     if(return_size):
         return device_batched_graphs, max_pad_nodes_to, max_pad_edges_to
@@ -284,7 +321,7 @@ def pmap_graph_list_better(maybe_meta_graph_list, dataset_statistics_dict, pad_f
 
 def pmap_graph_list_to(jraph_graph_list, pad_nodes_to, pad_edges_to, pad_func = pad_with_graphs):
     n_devices = jax.local_device_count()
-    n_graphs_per_device = int(len(jraph_graph_list) / n_devices)
+    jraph_graph_list, n_graphs_per_device = _repeat_graphs_for_devices(jraph_graph_list, n_devices)
 
 
     device_batched_graphs = [jraph.batch_np(jraph_graph_list[idx * n_graphs_per_device: (idx + 1) * n_graphs_per_device])

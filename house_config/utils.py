@@ -157,7 +157,7 @@ def calculate_order_violations(meta_graph, bins: jnp.ndarray, what="things") -> 
     i = idx[:, None]
     j = idx[None, :]
 
-    return jnp.sum((i < j) & (x[:, None] > x[None, :]))
+    return (i < j) & (x[:, None] > x[None, :])
 
 
 def compute_node_graph_indices(graph) -> Tuple[jnp.ndarray, int, int]:

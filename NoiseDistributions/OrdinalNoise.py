@@ -16,36 +16,42 @@ class OrdinalNoiseDistr(BaseNoiseDistr):
     def calculate_noise_distr_reward(self, noise_distr_step, entropy_reward):
         return -(noise_distr_step - entropy_reward)
 
+    def _transition_log_probs(self, x_prev, beta_t):
+        """Return log transition probabilities for a single ordinal value."""
+        num_states = self.n_bernoilli_features
+        states = jnp.arange(num_states)
+        sigma = self.ordinal_sigma
+        x_prev = jnp.asarray(x_prev, dtype=jnp.int32)
+
+        safe_change_mass = jnp.where(num_states <= 1, 0.0, beta_t)
+        stay_prob = jnp.where(num_states <= 1, 1.0, 1 - safe_change_mass)
+
+        distances = states - x_prev
+        weights = jnp.exp(-0.5 * (distances / sigma) ** 2)
+        weights = weights.at[x_prev].set(0.0)
+
+        weight_sum = jnp.sum(weights)
+        safe_denominator = jnp.where(weight_sum > 0, weight_sum, 1.0)
+        normalized_weights = jnp.where(
+            weight_sum > 0,
+            weights / safe_denominator,
+            jnp.ones_like(weights) / jnp.maximum(num_states - 1, 1),
+        )
+
+        change_probs = safe_change_mass * normalized_weights
+        transition_probs = change_probs.at[x_prev].set(stay_prob)
+        transition_probs = jnp.clip(transition_probs, a_min=1e-12)
+
+        return jnp.log(transition_probs)
+
     def _log_transition_probabilities(self, X_prev, X_next, beta_t):
         """
         Calculate log transition probabilities for an ordinal variable where nearby states are more likely.
         A discretized Gaussian centered at X_prev distributes the total change mass beta_t across other states.
         """
-        num_states = self.n_bernoilli_features
-        states = jnp.arange(num_states)
-        sigma = self.ordinal_sigma
-
-        safe_change_mass = jnp.where(num_states <= 1, 0.0, beta_t)
-        stay_prob = jnp.where(num_states <= 1, 1.0, 1 - safe_change_mass)
-
         def log_prob_single(x_prev, x_next):
-            distances = states - x_prev
-            weights = jnp.exp(-0.5 * (distances / sigma) ** 2)
-            weights = weights.at[x_prev].set(0.0)
-
-            weight_sum = jnp.sum(weights)
-            safe_denominator = jnp.where(weight_sum > 0, weight_sum, 1.0)
-            normalized_weights = jnp.where(
-                weight_sum > 0,
-                weights / safe_denominator,
-                jnp.ones_like(weights) / jnp.maximum(num_states - 1, 1),
-            )
-
-            change_probs = safe_change_mass * normalized_weights
-            transition_probs = change_probs.at[x_prev].set(stay_prob)
-            transition_probs = jnp.clip(transition_probs, a_min=1e-12)
-
-            return jnp.log(transition_probs[x_next])
+            log_transition_probs = self._transition_log_probs(x_prev, beta_t)
+            return log_transition_probs[x_next]
 
         vmapped_log_prob = jax.vmap(log_prob_single)
         flat_log = vmapped_log_prob(X_prev.reshape(-1), X_next.reshape(-1))
@@ -70,8 +76,27 @@ class OrdinalNoiseDistr(BaseNoiseDistr):
         return log_p_per_graph
 
     @partial(jax.jit, static_argnums=(0,))
-    def calc_noise_loss(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, gamma_t, node_gr_idx, T):
-        raise ValueError("relaxed does not make sense here")
+    def calc_noise_loss(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T):
+        gamma_t = self.beta_arr[model_step_idx]
+        beta_t = 2 * gamma_t
+        probs_next = jax.nn.softmax(spin_logits_next, axis=-1)
+
+        X_prev_flat = X_prev[..., 0].reshape(-1)
+        probs_next_flat = probs_next.reshape(-1, probs_next.shape[-1])
+
+        def expected_log_prob(x_prev, prob_next):
+            log_transition_probs = self._transition_log_probs(x_prev, beta_t)
+            return jnp.sum(prob_next * log_transition_probs)
+
+        vmapped_expected_log_prob = jax.vmap(expected_log_prob)
+        expected_log = vmapped_expected_log_prob(X_prev_flat, probs_next_flat)
+        expected_log = expected_log.reshape(X_prev[..., 0].shape)
+
+        noise_per_node = expected_log
+        n_graph = jraph_graph.n_node.shape[0]
+        noise_per_graph = jax.ops.segment_sum(noise_per_node, node_gr_idx, n_graph)
+
+        return T * noise_per_graph, jnp.sum(log_p_prev_per_node, axis=0)
 
     @partial(jax.jit, static_argnums=(0,))
     def calc_noise_step_relaxed(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, gamma_t, node_gr_idx):

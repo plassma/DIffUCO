@@ -181,7 +181,7 @@ class HCProblem:
 	
 def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=None, solution_nodes = None, verbose=False, meta_graph=None):
 	if solution_nodes is not None:
-		solution_nodes = solution_nodes[meta_graph.globals["node_types"].squeeze() >= 0]
+		solution_nodes = solution_nodes[meta_graph.globals["node_types"][0] >= 0]
 		offset_node_types = meta_graph.globals["offset_per_node_type"]
 		while offset_node_types.ndim > 1:
 			offset_node_types = offset_node_types[0]

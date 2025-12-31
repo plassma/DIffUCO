@@ -40,7 +40,7 @@ class DiffModel(nn.Module):
 	n_bernoulli_features: int = 1
 	mean_aggr: bool = False
 	EncoderModel: str = "normal"
-	n_random_node_features: int = 5
+	dim_energy_per_node: int = 1
 	train_mode: str = "REINFORCE"
 	graph_norm: bool = False
 	bfloat16: bool = False
@@ -142,9 +142,9 @@ class DiffModel(nn.Module):
 
 
 	@partial(flax.linen.jit, static_argnums=(0,), static_argnames=("deterministic",))
-	def __call__(self, jraph_graph_list, X_prev, rand_node_features, t_idx_per_node, key, *, deterministic: bool = True, pred_type: int = 0):
+	def __call__(self, jraph_graph_list, X_prev, energy_per_node, t_idx_per_node, key, *, deterministic: bool = True, pred_type: int = 0):
 		X_prev = X_prev.astype(jnp.int32)
-		X_prev_emb, node_types_emb, nth_of_type_emb, key = self.embed_nodes(X_prev, rand_node_features, t_idx_per_node, jraph_graph_list["graphs"][0], key)
+		X_prev_emb, node_types_emb, nth_of_type_emb, key = self.embed_nodes(X_prev, energy_per_node, t_idx_per_node, jraph_graph_list["graphs"][0], key)
 		X_prev_emb = jnp.concatenate([X_prev_emb], axis = -1)
 
 		#pred_type_emb = self.pred_type_emb(jnp.full(X_prev.shape[0], pred_type, dtype=jnp.int32))
@@ -223,7 +223,7 @@ class DiffModel(nn.Module):
 	@partial(flax.linen.jit, static_argnums=0)
 	def reinit_rand_nodes(self, X_t,  key):
 		key, subkey = jax.random.split(key)
-		rand_nodes = jax.random.uniform(subkey, shape=(X_t.shape[0], self.n_random_node_features))
+		rand_nodes = jax.random.uniform(subkey, shape=(X_t.shape[0], self.dim_energy_per_node))
 
 		return rand_nodes, key
 
@@ -236,7 +236,7 @@ class DiffModel(nn.Module):
 		return connections_per_node
 
 	@partial(flax.linen.jit, static_argnums=(0,))
-	def embed_nodes(self, X_t, rand_nodes, t_idx_per_node, jraph_graph, key):
+	def embed_nodes(self, X_t, energy_per_node, t_idx_per_node, jraph_graph, key):
 		dtype = jnp.bfloat16 if self.bfloat16 else jnp.float32
 		t_idx = jnp.squeeze(t_idx_per_node, axis=-1)
 		t_idx = jnp.clip(t_idx, 0, self.n_diff_steps - 1)
@@ -254,8 +254,10 @@ class DiffModel(nn.Module):
 		node_types_emb = self.node_type_emb(jraph_graph.globals["node_types"])#self.vmap_get_sinusoidal_positional_encoding(node_types, self.embedding_dim // 4).astype(dtype) # todo plassma: max position hardcoded for now
 
 		nth_of_type_emb = self.vmap_get_sinusoidal_positional_encoding(jraph_graph.globals["nth_of_type"], 16).astype(dtype) # self.nth_of_type_emb(jraph_graph.globals["nth_of_type"])
+
+		energy_per_node_emb = self.vmap_get_sinusoidal_positional_encoding((energy_per_node.squeeze()).astype(jnp.int32), 8).astype(dtype)
 		
-		X_input = jnp.concatenate([T_embed, node_types_emb, nth_of_type_emb], axis=-1) # we don't need rand_nodes! # n_nodes
+		X_input = jnp.concatenate([T_embed, node_types_emb, nth_of_type_emb, ], axis=-1) # we don't need rand_nodes! # energy_per_node_emb
 
 		if self.node_emb_type == "one_hot":
 			X_emb = jax.nn.one_hot(X_t[..., 0], num_classes=jraph_graph.meta["cabinets"])
@@ -274,13 +276,13 @@ class DiffModel(nn.Module):
 			X_emb = self.vmap_get_sinusoidal_positional_encoding(X_t[..., 0], self.embedding_dim)
 
 		X_emb = X_emb.astype(dtype)
-		X_input = jnp.concatenate([X_input, X_emb], axis=-1).astype(dtype)
+		X_input = jnp.concatenate([X_input, X_emb, ], axis=-1).astype(dtype) # energy_per_node_emb
 
 		
 		return X_input, node_types_emb, nth_of_type_emb, key
 
 	@partial(flax.linen.jit, static_argnums=0, static_argnames=("deterministic",))
-	def make_one_step(self,params ,jraph_graph_list, X_prev, t_idx_per_node, key, deterministic: bool = True, step: int = 0):
+	def make_one_step(self,params ,jraph_graph_list, X_prev, energy_per_node, t_idx_per_node, key, deterministic: bool = True, step: int = 0):
 		rand_nodes, key = self.reinit_rand_nodes(X_prev, key)
 
 		rngs = None
@@ -290,7 +292,7 @@ class DiffModel(nn.Module):
 		
 		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
 
-		out_dict, key = self.apply(params, jraph_graph_list, X_prev, rand_nodes, t_idx_per_node, key, deterministic=deterministic, rngs=rngs)
+		out_dict, key = self.apply(params, jraph_graph_list, X_prev, energy_per_node, t_idx_per_node, key, deterministic=deterministic, rngs=rngs)
 		X_next, spin_log_probs, key = self.sample_from_model(out_dict["spin_logits"], jraph_graph_list, key)
 
 		graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)/(n_node))[:-1]))
@@ -299,14 +301,15 @@ class DiffModel(nn.Module):
 		out_dict["state_log_probs"] = self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)
 		out_dict["graph_log_prob"] = graph_log_prob
 		return out_dict, key
+	
 	@partial(flax.linen.jit, static_argnums=0)
-	def make_one_step_force_samples(self,params ,jraph_graph_list, X_prev, X_next, t_idx_per_node, key, step: int = 0):
+	def make_one_step_force_samples(self,params ,jraph_graph_list, X_prev, X_next, energy_per_node, t_idx_per_node, key, step: int = 0):
 		rand_nodes, key = self.reinit_rand_nodes(X_prev, key)
 
 		
 		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
 
-		out_dict, key = self.apply(params, jraph_graph_list, X_prev, rand_nodes, t_idx_per_node, key, deterministic=True)
+		out_dict, key = self.apply(params, jraph_graph_list, X_prev, energy_per_node, t_idx_per_node, key, deterministic=True)
 		X_next, spin_log_probs = self.force_sample_from_model(out_dict["spin_logits"], X_next)
 
 		graph_log_prob = jax.lax.stop_gradient(jnp.exp((self.__get_log_prob(spin_log_probs[...,0], node_graph_idx, n_graph)/(n_node))[:-1]))
@@ -371,8 +374,8 @@ class DiffModel(nn.Module):
 		return X_next, spin_log_probs
 	
 	@partial(flax.linen.jit, static_argnums=0)
-	def calc_log_q(self, params, jraph_graph_list, X_prev, rand_nodes, X_next, t_idx_per_node, key):
-		out_dict, key = self.apply(params, jraph_graph_list, X_prev, rand_nodes, t_idx_per_node, key)
+	def calc_log_q(self, params, jraph_graph_list, X_prev, energy_per_node, X_next, t_idx_per_node, key):
+		out_dict, key = self.apply(params, jraph_graph_list, X_prev, energy_per_node, t_idx_per_node, key)
 
 		spin_logits = out_dict["spin_logits"]
 		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)

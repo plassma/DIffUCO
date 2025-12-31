@@ -16,9 +16,12 @@ parser.add_argument('--train_mode', default='REINFORCE', choices = ["REINFORCE",
 parser.add_argument('--AnnealSchedule', default='linear', choices = ["linear", "cosine", "exp", "linear_cyclic"], help='Define the Annealing Schedule')
 parser.add_argument('--temps', default=[0.], type = float, help='Define gridsearch over Temperature', nargs = "+")
 parser.add_argument('--T_target', default=0., type = float, help='Define target temperature')
+parser.add_argument('--T_explore', default=None, type=float, help='Exploration temperature used at the start of each anneal_explore_period')
 parser.add_argument('--N_warmup', default=0, type = int, help='Define gridsearch over Number of Annealing steps')
 parser.add_argument('--N_anneal', default=[2000], type = int, help='Define gridsearch over Number of Annealing steps', nargs = "+")
 parser.add_argument('--N_equil', default = 0, type = int, help='Define gridsearch over Number of Equil steps')
+parser.add_argument('--anneal_explore_period', default=0, type=int, help='Number of epochs that form one exploration period (0 disables)')
+parser.add_argument('--explore_fraction', default=0.0, type=float, help='Fraction of each period to hold temperature at T_explore')
 parser.add_argument('--lrs', default=[5e-5], type = float, help='Define gridsearch over learning rate', nargs = "+")
 parser.add_argument('--lr_schedule', default="cosine", choices = ["cosine", "None"], help='use learning rate schedule or not')
 parser.add_argument('--seed', default=[123], type = int, help='Define dataset seed', nargs = "+")
@@ -149,7 +152,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"load_only_params": args.load_only_params, "node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"load_only_params": args.load_only_params, "node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "T_explore": args.T_explore, "anneal_explore_period": args.anneal_explore_period, "explore_fraction": args.explore_fraction, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -215,9 +218,12 @@ def detect_and_run_for_loops():
                                                 "n_random_node_features": args.n_rand_nodes,
                                                 "relaxed": args.relaxed,
                                                 "T_max": temp,
+                                                "T_explore": args.T_explore,
                                                 "N_warmup": args.N_warmup,
                                                 "N_anneal": N_anneal,
                                                 "N_equil": args.N_equil,
+                                                "anneal_explore_period": args.anneal_explore_period,
+                                                "explore_fraction": args.explore_fraction,
                                                 "n_hidden_neurons": nh,
                                                 "n_features_list_prob": [2],
                                                 "n_features_list_nodes": [nh, nh],
@@ -289,8 +295,8 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 5e-5,
-        "min_lr": 2.5e-5,
+        "lr": 1e-4,
+        "min_lr": 1e-5,
         "batch_size": 30, # H
         "N_basis_states": 1000, # n_s
 
@@ -299,9 +305,12 @@ def run( flexible_config, overwrite = True):
         "relaxed": True,
 
         "T_max": 0.01,
+        "T_explore": 0.01,
         "N_warmup": 0,
         "N_anneal": 2000,
         "N_equil": 0,
+        "anneal_explore_period": 200,
+        "explore_fraction": 0.1,
         "stop_epochs": 100000,
 
         ### TODO rework network and remove edge updates
@@ -357,10 +366,10 @@ def run( flexible_config, overwrite = True):
         "node_transformer_dropout_rate": 0.0,
         "sample_groupwise": False,
         "transformer_type": "linear",
-        "sample_multiplier": 10,
+        "sample_multiplier": 1,
         "anneal_cycle_length": 200,
         "energy_weights": {
-            "energy_ownerships": 1.0,
+            "energy_ownerships": 1,
             "energy_things_per_cabinet": 1.0,
             "energy_cabinets_per_room": 1.0,
             "energy_order_violations": 3.0,
@@ -381,6 +390,11 @@ def run( flexible_config, overwrite = True):
 
     config["T_max"] = config["T_max"] * 10. / config["n_bernoulli_features"]
     config["T_target"] = config["T_target"] * 10. / config["n_bernoulli_features"]
+    if config["T_explore"] is not None:
+        config["T_explore"] = config["T_explore"] * 10. / config["n_bernoulli_features"]
+
+    #config["lr"] = config["lr"] * (500 / config["N_anneal"])
+    #config["min_lr"] = config["min_lr"] * (500 / config["N_anneal"])
     #config["T_target"] = config["T_max"] * 1
 
     #config["embedding_dim"] = [32, 32, 32, 32][config["use_sample"]]
