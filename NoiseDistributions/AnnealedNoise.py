@@ -38,7 +38,9 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
         node_gr_idx = jnp.repeat(graph_idx, n_node, axis=0, total_repeat_length=total_num_nodes)
 
         gamma_t = self.get_gamma_t(t_idx)
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, X_prev, node_gr_idx)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(
+            jraph_graph, X_prev, node_gr_idx, self.config.get("ownership_weight", 1.0)
+        )
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         log_p = (-1)*gamma_t/T*Noise_Energy_per_graph
         return log_p
@@ -46,7 +48,9 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
     @partial(jax.jit, static_argnums=(0,))
     def calc_noise_loss(self, jraph_graph, spin_logits_prev, spin_logits_next, X_prev, log_p_prev_per_node, model_step_idx, node_gr_idx, T):
         gamma_t = self.beta_arr[model_step_idx]
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, spin_logits_prev, node_gr_idx)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(
+            jraph_graph, spin_logits_prev, node_gr_idx, self.config.get("ownership_weight", 1.0)
+        )
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         return (-1)*gamma_t*Noise_Energy_per_graph, jnp.sum(log_p_prev_per_node[:-1], axis = 0)
 
@@ -54,7 +58,9 @@ class AnnealedNoiseDistr(BaseNoiseDistr):
     def calc_noise_step(self, jraph_graph, X_prev, X_next, model_step_idx, node_gr_idx, T, noise_rewards_arr):
         gamma_t = self.beta_arr[model_step_idx]
         reward_idx = jnp.where(model_step_idx - 1 < 0, jnp.zeros_like(model_step_idx), model_step_idx - 1)  ### when model_step_idx - 1 == 1 hamma_t shoudl be 0!
-        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy(jraph_graph, X_prev, node_gr_idx)
+        Noise_Energy_per_graph, _, _ = self.vmapped_relaxed_energy(
+            jraph_graph, X_prev, node_gr_idx, self.config.get("ownership_weight", 1.0)
+        )
         Noise_Energy_per_graph = jnp.squeeze(Noise_Energy_per_graph, axis = -1)
         noise_step_value = gamma_t*Noise_Energy_per_graph
         noise_rewards_arr = noise_rewards_arr.at[reward_idx].set(noise_rewards_arr[reward_idx] - noise_step_value)

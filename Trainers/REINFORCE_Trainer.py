@@ -65,9 +65,9 @@ class Reinforce(Base):
 
         n_graph = jraph_graph.n_node.shape[0]
 
-        relaxed_energies_per_graph, HA_per_graph, HB_per_graph = self.vmapped_relaxed_energy_for_Loss(jraph_graph,
-                                                                                                      spin_logits,
-                                                                                                      node_gr_idx)
+        relaxed_energies_per_graph, HA_per_graph, HB_per_graph = self.vmapped_relaxed_energy_for_Loss(
+            jraph_graph, spin_logits, node_gr_idx, self.ownership_weight
+        )
 
         HA = jnp.mean(HA_per_graph[:-1])
         HB = jnp.mean(HB_per_graph[:-1])

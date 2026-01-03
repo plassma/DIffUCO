@@ -104,8 +104,8 @@ class ConditionalExpectation:
 
     def __load_network(self):
         self.params, self.config  = self.__load_params()
-        print("loaded", jax.tree_map(lambda x: x.shape, self.params))
-        self.params = jax.tree_map(lambda x: x[0], self.params)
+        print("loaded", jax.tree_util.tree_map(lambda x: x.shape, self.params))
+        self.params = jax.tree_util.tree_map(lambda x: x[0], self.params)
         self.params = jax.device_put_replicated(self.params, list(jax.devices()))
 
         print(f"wandb ID: {self.wandb_id}\nDataset: {self.config['dataset_name']} | Problem: {self.config['problem_name']}")
@@ -189,7 +189,9 @@ class ConditionalExpectation:
 
         def calc_energy(vmapped_probs):
             resh_vmapped_probs = _np.reshape(vmapped_probs, (vmapped_probs.shape[0], orig_probs.shape[0],orig_probs.shape[1]))
-            vmapped_energies, _, _ = self.model.TrainerClass.vmapped_relaxed_energy(jraph_graph, jnp.swapaxes(resh_vmapped_probs, 0,1), node_graph_idx)
+            vmapped_energies, _, _ = self.model.TrainerClass.vmapped_relaxed_energy(
+                jraph_graph, jnp.swapaxes(resh_vmapped_probs, 0,1), node_graph_idx, self.model.TrainerClass.ownership_weight
+            )
             vmapped_energies = jnp.swapaxes(vmapped_energies, 0, 1)
             max_idx = _np.argmin(vmapped_energies.flatten(), axis = 0)
             return vmapped_energies, vmapped_probs, max_idx

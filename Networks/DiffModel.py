@@ -421,7 +421,6 @@ class DiffModel(nn.Module):
 		# print("average prob 0", jnp.mean(graph_log_prob))
 		return log_p_X_T
 
-	@partial(flax.linen.jit, static_argnums=(0,2))
 	def sample_prior(self, j_graph, N_basis_states, key):
 		nodes = j_graph.nodes
 		shape = (nodes.shape[0], N_basis_states, 1)
@@ -436,7 +435,6 @@ class DiffModel(nn.Module):
 		one_hot_state = jax.nn.one_hot(X_prev[..., 0], num_classes=j_graph.meta["cabinets"])
 		return X_prev, one_hot_state, log_p_uniform, key
 
-	@partial(flax.linen.jit, static_argnums=(0,2))
 	def sample_prior_w_probs(self, j_graph, N_basis_states, key):
 		X_T, one_hot_state, log_p_uniform, key = self.sample_prior(j_graph, N_basis_states, key)
 		log_p_X_T = self.calc_log_q_T(j_graph, X_T)

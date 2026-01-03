@@ -295,8 +295,8 @@ def run( flexible_config, overwrite = True):
         "wandb": True,
 
         "seed": 123,
-        "lr": 1e-4,
-        "min_lr": 1e-5,
+        "lr": 5e-5,
+        "min_lr": 2.5e-5,
         "batch_size": 30, # H
         "N_basis_states": 1000, # n_s
 
@@ -366,14 +366,16 @@ def run( flexible_config, overwrite = True):
         "node_transformer_dropout_rate": 0.0,
         "sample_groupwise": False,
         "transformer_type": "linear",
-        "sample_multiplier": 1,
+        "sample_multiplier": 2,
         "anneal_cycle_length": 200,
+        "ownership_weight": 1.0,
         "energy_weights": {
-            "energy_ownerships": 1,
+            "energy_ownerships": 1.0,
             "energy_things_per_cabinet": 1.0,
             "energy_cabinets_per_room": 1.0,
             "energy_order_violations": 3.0,
-            "asymmetric": False,
+            "energy_order_violations_cabinets": .0,
+            "energy_order_violations_rooms": .0,
             "exp_cabinets_things_rooms": 2.0,
         }
     }

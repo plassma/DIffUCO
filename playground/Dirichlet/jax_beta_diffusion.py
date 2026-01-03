@@ -253,7 +253,7 @@ class Trainer():
             self.params = optax.apply_updates(self.params, updates)
 
             print("curr_T", T)
-            #mean_grads = jax.tree_map(lambda x: jnp.mean(x), grads)
+            #mean_grads = jax.tree_util.tree_map(lambda x: jnp.mean(x), grads)
             # print("min and max")
             # print(np.min([el["X_next"] for el in log_dict["log_list"]]))
             # print(np.max([el["X_next"] for el in log_dict["log_list"]]))

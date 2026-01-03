@@ -28,6 +28,7 @@ class Base(ABC):
         self.eval_step_factor = self.config["eval_step_factor"]
         self.n_sampling_rounds = self.config["n_sampling_rounds"]
         self.sampling_temp = self.config["sampling_temp"]
+        self.ownership_weight = self.config.get("ownership_weight", 1.0)
         print("EVAL STEP FACTOR is", self.eval_step_factor)
 
         def _make_one_step_det(params, graphs, X_prev, energy_per_node, t_idx_per_node, key, step=0):
@@ -86,7 +87,31 @@ class Base(ABC):
         self.vmapped_sample_forward_diff_process = jax.vmap(self.NoiseDistrClass.sample_forward_diff_process, in_axes=(1, None, 0), out_axes=(1,1, 0))
 
         self.relaxed_energy = EnergyClass.calculate_Energy
-        self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None), out_axes=(1, 1, 1))
+        self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
+
+        def _relaxed_energy(meta_graph, bins, node_gr_idx, ownership_weight):
+            if self.problem_name == "HCP":
+                return self.relaxed_energy(meta_graph, bins, node_gr_idx, A=ownership_weight)
+            return self.relaxed_energy(meta_graph, bins, node_gr_idx)
+
+        def _relaxed_energy_loss(meta_graph, logits, node_gr_idx, ownership_weight):
+            if self.problem_name == "HCP":
+                return self.relaxed_Energy_for_Loss(meta_graph, logits, node_gr_idx, A=ownership_weight)
+            return self.relaxed_Energy_for_Loss(meta_graph, logits, node_gr_idx)
+
+        _vmapped_relaxed_energy = jax.vmap(_relaxed_energy, in_axes=(None, 1, None, None), out_axes=(1, 1, 1))
+        _vmapped_relaxed_energy_for_Loss = jax.vmap(_relaxed_energy_loss, in_axes=(None, 1, None, None),
+                                                        out_axes=(1))
+
+        def vmapped_relaxed_energy(meta_graph, bins, node_gr_idx, ownership_weight=None):
+            weight = self.ownership_weight if ownership_weight is None else ownership_weight
+            return _vmapped_relaxed_energy(meta_graph, bins, node_gr_idx, weight)
+
+        def vmapped_relaxed_energy_for_Loss(meta_graph, logits, node_gr_idx, ownership_weight=None):
+            weight = self.ownership_weight if ownership_weight is None else ownership_weight
+            return _vmapped_relaxed_energy_for_Loss(meta_graph, logits, node_gr_idx, weight)
+
+        self.vmapped_relaxed_energy = vmapped_relaxed_energy
 
         self.energy_CE = EnergyClass.calculate_Energy_CE
         self.vmapped_energy_CE = jax.vmap(self.energy_CE, in_axes=(None, 1, None), out_axes=(1))
@@ -97,9 +122,7 @@ class Base(ABC):
         self.energy_feasible = EnergyClass.calculate_Energy_feasible
         self.vmapped_energy_feasible = jax.vmap(self.energy_feasible, in_axes=(None, 1), out_axes=(1, 0, 1))
 
-        self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-        self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None),
-                                                        out_axes=(1))
+        self.vmapped_relaxed_energy_for_Loss = vmapped_relaxed_energy_for_Loss
 
         self.pmap_apply_CE_on_p = jax.pmap(self.apply_CE_on_p, in_axes=(0, 0))
 
@@ -425,7 +448,7 @@ class Base(ABC):
 
         X_0 = X_next
         X_0 = jnp.array(X_0, dtype=jnp.float64)
-        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx, self.ownership_weight)
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[i + 1].set(log_p_0)
 
@@ -477,7 +500,7 @@ class Base(ABC):
         X_0 = X_next
         Xs_over_different_steps = scan_dict["Xs_over_different_steps"]
 
-        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx, self.ownership_weight)
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[-1].set(log_p_0)
 
@@ -630,7 +653,7 @@ class Base(ABC):
 
         X_0 = X_next
         X_0 = jnp.array(X_0, dtype=jnp.float64)
-        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx)
+        energies, _, _ = self.vmapped_relaxed_energy(energy_graph_batch, X_0, node_gr_idx, self.ownership_weight)
         log_p_0 = self.EnergyClass.get_log_p_0_from_energy(energies, T)
         log_p_0_T = log_p_0_T.at[i + 1].set(log_p_0)
 

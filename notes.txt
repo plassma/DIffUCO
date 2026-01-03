@@ -1,0 +1,21 @@
+original jax:
+Name: jax
+Version: 0.4.30
+Summary: Differentiate, compile, and transform Numpy code.
+Home-page: https://github.com/google/jax
+Author: JAX team
+Author-email: jax-dev@google.com
+License: Apache-2.0
+Location: /system/apps/userenv/mplasser/DiffUCO/lib/python3.10/site-packages
+Requires: jaxlib, ml-dtypes, numpy, opt-einsum, scipy
+Required-by: chex, flax, jraph, optax, orbax-checkpoint
+---
+Name: jaxlib
+Version: 0.4.30
+Summary: XLA library for JAX
+Home-page: https://github.com/google/jax
+Author: JAX team
+Author-email: jax-dev@google.com
+License: Apache-2.0
+
+python -m pip install --upgrade "jax[cuda]" jaxlib flax

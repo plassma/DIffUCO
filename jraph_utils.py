@@ -248,7 +248,7 @@ def device_batch(graph_generator, np_ = np):
     for idx, graph in enumerate(graph_generator):
         if idx % num_devices == num_devices - 1:
             batch.append(graph)
-            yield jax.tree_map(lambda *x: np_.stack(x, axis=0), *batch) ### TODO text wheter numpy or jnp is better here
+            yield jax.tree_util.tree_map(lambda *x: np_.stack(x, axis=0), *batch) ### TODO text wheter numpy or jnp is better here
             batch = []
         else:
             batch.append(graph)

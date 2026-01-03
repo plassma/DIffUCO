@@ -53,6 +53,8 @@ class TrainMeanField:
 		self.path_to_models = os.getcwd() + "/Checkpoints"
 
 		self.config = self._init_config(config)
+		self.config.setdefault("ownership_weight", 1.0)
+		self.ownership_weight = self.config["ownership_weight"]
 		self.config["eval_step_factor"] = eval_step_factor
 		print(self.config)
 
@@ -289,9 +291,31 @@ class TrainMeanField:
 		self.EnergyClass = EnergyClass
 		self.relaxed_energy = EnergyClass.calculate_Energy
 		self.relaxed_Energy_for_Loss = EnergyClass.calculate_Energy_loss
-		self.vmapped_relaxed_energy = jax.vmap(self.relaxed_energy, in_axes=(None, 1, None), out_axes=(1))
-		self.vmapped_relaxed_energy_for_Loss = jax.vmap(self.relaxed_Energy_for_Loss, in_axes=(None, 1, None),
+
+		def _relaxed_energy(meta_graph, bins, node_gr_idx, ownership_weight):
+			if self.problem_name == "HCP":
+				return self.relaxed_energy(meta_graph, bins, node_gr_idx, A=ownership_weight)
+			return self.relaxed_energy(meta_graph, bins, node_gr_idx)
+
+		def _relaxed_energy_loss(meta_graph, logits, node_gr_idx, ownership_weight):
+			if self.problem_name == "HCP":
+				return self.relaxed_Energy_for_Loss(meta_graph, logits, node_gr_idx, A=ownership_weight)
+			return self.relaxed_Energy_for_Loss(meta_graph, logits, node_gr_idx)
+
+		_vmapped_relaxed_energy = jax.vmap(_relaxed_energy, in_axes=(None, 1, None, None), out_axes=(1))
+		_vmapped_relaxed_energy_for_Loss = jax.vmap(_relaxed_energy_loss, in_axes=(None, 1, None, None),
 														out_axes=(1))
+
+		def vmapped_relaxed_energy(meta_graph, bins, node_gr_idx, ownership_weight=None):
+			weight = self.ownership_weight if ownership_weight is None else ownership_weight
+			return _vmapped_relaxed_energy(meta_graph, bins, node_gr_idx, weight)
+
+		def vmapped_relaxed_energy_for_Loss(meta_graph, logits, node_gr_idx, ownership_weight=None):
+			weight = self.ownership_weight if ownership_weight is None else ownership_weight
+			return _vmapped_relaxed_energy_for_Loss(meta_graph, logits, node_gr_idx, weight)
+
+		self.vmapped_relaxed_energy = vmapped_relaxed_energy
+		self.vmapped_relaxed_energy_for_Loss = vmapped_relaxed_energy_for_Loss
 		self.config["vmapped_energy_loss_func"] = self.vmapped_relaxed_energy_for_Loss
 		self.config["vmapped_energy_func"] = self.vmapped_relaxed_energy
 
@@ -413,9 +437,9 @@ class TrainMeanField:
 
 		if(self.bfloat16):
 			print("cast to bfloat16 init")
-			#print(jax.tree_map(lambda x: x.dtype, self.params))
-			self.params = jax.tree_map(lambda x: x.astype(jax.numpy.bfloat16), self.params)
-			#print(jax.tree_map(lambda x: x.dtype, self.params))
+			#print(jax.tree_util.tree_map(lambda x: x.dtype, self.params))
+			self.params = jax.tree_util.tree_map(lambda x: x.astype(jax.numpy.bfloat16), self.params)
+			#print(jax.tree_util.tree_map(lambda x: x.dtype, self.params))
 
 	def __init_optimizer(self, lr, params):
 		# self.optimizer = optax.radam(learning_rate=self.curr_lr)
@@ -452,7 +476,7 @@ class TrainMeanField:
 		else:
 			loaded_dict = self._load_last_epoch()
 			self.opt_state = loaded_dict["opt_state"]
-			self.opt_state = jax.tree_map(lambda x: x[0], self.opt_state)
+			self.opt_state = jax.tree_util.tree_map(lambda x: x[0], self.opt_state)
 			self.opt_state = jax.device_put_replicated(self.opt_state, list(jax.devices()))
 
 		self.TrainerClass.opt_update = self.opt_update
@@ -475,7 +499,7 @@ class TrainMeanField:
 		jraph_graph_dict = next(iter(self.dataloader_val))
 
 		if (self.load_wandb_id != None):
-			self.params = jax.tree_map(lambda x: x[0], self.params)
+			self.params = jax.tree_util.tree_map(lambda x: x[0], self.params)
 		elif(self.graph_mode != "U_net"):
 
 			input_graph_list, energy_graphs = self._prepare_graphs(jraph_graph_dict, mode = "val")
@@ -491,8 +515,8 @@ class TrainMeanField:
 			reps = 10
 			iters = len(self.dataloader_train)*reps
 			U_net_graph_dict = jraph_graph_dict["U_net_graph_dict"][0]
-			U_net_graph_dict = jax.tree_map(lambda x: jnp.array(x), U_net_graph_dict)
-			print(jax.tree_map(lambda x: x.shape, U_net_graph_dict))
+			U_net_graph_dict = jax.tree_util.tree_map(lambda x: jnp.array(x), U_net_graph_dict)
+			print(jax.tree_util.tree_map(lambda x: x.shape, U_net_graph_dict))
 			#batched_U_net_graph_dict = batch_U_net_graph_dict(jraph_graph_dict["U_net_graph_dict"])
 			#batched_U_net_graph_dict_2 = pmap_batch_U_net_graph_dict_and_pad(jraph_graph_dict["U_net_graph_dict"])
 			input_graph_list, energy_graphs = self._prepare_graphs(jraph_graph_dict)
@@ -516,7 +540,7 @@ class TrainMeanField:
 		self.params = jax.device_put_replicated(self.params, list(jax.devices()))
 
 		print("pmapped params")
-		print(jax.tree_map(lambda x: x.shape, self.params))
+		print(jax.tree_util.tree_map(lambda x: x.shape, self.params))
 
 	def _init_and_test_MCMC_sampler(self):
 		self.__init_MCMCSampler()
@@ -558,7 +582,7 @@ class TrainMeanField:
 
 	@partial(jax.jit, static_argnums=(0,))
 	def jittet_tree_mean(self, grad):
-		return jax.tree_map(lambda x: jnp.mean(x, axis = 0),grad)
+		return jax.tree_util.tree_map(lambda x: jnp.mean(x, axis = 0),grad)
 
 
 	def __linear_annealing(self, epoch):
@@ -695,6 +719,7 @@ class TrainMeanField:
 			start_train_time = time.time()
 
 			self.T, skip_epoch = self._calculate_temperature(epoch)
+			self.ownership_weight = 1#0.1 + epoch * 2 / self.epochs
 			if skip_epoch:
 				continue
 
@@ -716,7 +741,7 @@ class TrainMeanField:
 				step3 = time.time()
 
 				if("metrics" in log_dict.keys()):
-					log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
+					log_dict_metrics = jax.tree_util.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
 					batch_log_dict = self.__calculate_reporting(energy_graph_batch.graph,
 						log_dict_metrics["energies"], gt_normed_energies, log_dict_metrics["spin_log_probs"], log_dict_metrics["free_energies"])
 					batch_log_dict["solution_prob_mean"] = log_dict_metrics["solution_prob_mean"]
@@ -733,6 +758,13 @@ class TrainMeanField:
 					for key in energy_dict.keys():
 						if key not in wandb_log_dict:
 							wandb_log_dict[key] = []
+						if key.startswith("energies/energy"):
+							wandb_log_dict[key + "_min"] = []
+							wandb_log_dict[key + "_max"] = []
+							wandb_log_dict[key + "_std"] = []
+							wandb_log_dict[key + "_min"].append(energy_dict[key].min())
+							wandb_log_dict[key + "_max"].append(energy_dict[key].max())
+							wandb_log_dict[key + "_std"].append(energy_dict[key].std())
 
 						wandb_log_dict[key].append(energy_dict[key])
 
@@ -769,7 +801,8 @@ class TrainMeanField:
 				"train/epoch": epoch,
 				"schedules/lr": new_lr,
 				"schedules/T": self.T,
-				"schedules/time": train_time_needed
+				"schedules/time": train_time_needed,
+				"schedules/ownership_weight": self.ownership_weight
 
 			}
 
@@ -851,7 +884,7 @@ class TrainMeanField:
 				wandb.log({"random sample": wandb.Image(target.name)}, commit=False, step=epoch)
 
 
-			log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
+			log_dict_metrics = jax.tree_util.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
 			if("Losses" in log_dict.keys()):
 				loss_dict = {f"losses/{key}": log_dict["Losses"][key] for key in log_dict["Losses"]}
 				for key in loss_dict.keys():
@@ -877,6 +910,14 @@ class TrainMeanField:
 				if key not in wandb_log_dict:
 					wandb_log_dict[key] = []
 
+				if key.startswith("energies/energy"):
+					wandb_log_dict[key + "_min"] = []
+					wandb_log_dict[key + "_max"] = []
+					wandb_log_dict[key + "_std"] = []
+					wandb_log_dict[key + "_min"].append(energy_dict[key].min())
+					wandb_log_dict[key + "_max"].append(energy_dict[key].max())
+					wandb_log_dict[key + "_std"].append(energy_dict[key].std())
+				
 				wandb_log_dict[key].append(energy_dict[key])
 
 			save_metrics_at_epoch["eval/energy"].append(batch_log_dict["mean_energy"])
@@ -952,7 +993,7 @@ class TrainMeanField:
 			time_dict["CE"].append(log_dict["time"]["CE"])
 
 
-			log_dict_metrics = jax.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
+			log_dict_metrics = jax.tree_util.tree_map(reshape_utils.unravel_dict, log_dict["metrics"])
 			if("Losses" in log_dict.keys()):
 				loss_dict = {f"losses/{key}": log_dict["Losses"][key] for key in log_dict["Losses"]}
 				for key in loss_dict.keys():
@@ -1320,7 +1361,7 @@ class TrainMeanField:
 	@partial(jax.jit, static_argnums=(0,))
 	def calc_mean_prob(self,graphs, spin_log_probs):
 		### TODO implement this for more than oe device
-		graphs = jax.tree_map(lambda x: jnp.concatenate(x, axis = 0), graphs)
+		graphs = jax.tree_util.tree_map(lambda x: jnp.concatenate(x, axis = 0), graphs)
 		nodes = graphs.nodes
 		n_node = graphs.n_node
 		n_graph = jax.tree_util.tree_leaves(n_node)[0].shape[0]

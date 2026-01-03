@@ -39,9 +39,9 @@ class PPO(Base):
         self.calc_noise_step = self.NoiseDistrClass.calc_noise_step
 
         self.pmap_calc_traces = jax.pmap(self._calc_traces, in_axes=(0,0))
-        self.pmap_environment_steps = jax.pmap(lambda a,b,c,d,e: self._environment_steps_scan(a,b,c,d,e, "train"), in_axes=(0, 0, 0, None, 0))
-        self.pmap_environment_steps_force_samples = jax.pmap(lambda a,b,c,d,e,f: self._environment_steps_scan_force_samples(a,b,c,d,e,f, "train"), in_axes=(0, 0, 0, 0, None, 0))
-        self._environment_steps_scan_eval = lambda a,b,c,d,e: self._environment_steps_scan(a,b,c,d,e, "eval")
+        self.pmap_environment_steps = jax.pmap(lambda a,b,c,d,e,f: self._environment_steps_scan(a,b,c,d,e,f, "train"), in_axes=(0, 0, 0, None, None, 0))
+        self.pmap_environment_steps_force_samples = jax.pmap(lambda a,b,c,d,e,f,g: self._environment_steps_scan_force_samples(a,b,c,d,e,f,g, "train"), in_axes=(0, 0, 0, 0, None, None, 0))
+        self._environment_steps_scan_eval = lambda a,b,c,d,e,f: self._environment_steps_scan(a,b,c,d,e,f, "eval")
 
         self.PPO_loss_grad = jax.jit(jax.value_and_grad(self.PPO_loss, has_aux=True))
         self.pmap_PPO_loss_backward = jax.pmap(self.loss_backward, in_axes=(0, 0, 0, 0,0), axis_name="device")
@@ -101,7 +101,7 @@ class PPO(Base):
         return params, opt_state
 
     def sample(self, params, graphs, energy_graph_batch, T, key):
-        (log_dict, _) =  self._environment_steps_scan_eval(params, graphs, energy_graph_batch, T, key)
+        (log_dict, _) =  self._environment_steps_scan_eval(params, graphs, energy_graph_batch, T, self.ownership_weight, key)
         loss = 0.
         ### TODO log reverse KL here?
         return loss, (log_dict, _)
@@ -201,7 +201,7 @@ class PPO(Base):
         for i in range(self.sample_multiplier): # self.sample_multiplier
             key, subkey = jax.random.split(key)
             batched_key = jax.random.split(subkey, num=len(jax.devices()))
-            temp_out_dict, _ = self.pmap_environment_steps(params, graphs, energy_graph_batch, T, batched_key)
+            temp_out_dict, _ = self.pmap_environment_steps(params, graphs, energy_graph_batch, T, self.ownership_weight, batched_key)
             temp_out_dict["RL"]["bin_sequence"] = temp_out_dict["bin_sequence"]
             if out_dict is None:
                 out_dict = temp_out_dict
@@ -215,11 +215,11 @@ class PPO(Base):
 
         #trajectories = out_dict["bin_sequence"]
         #aug_trajectories = trajectories.astype(jnp.int32)#aug_solution_jax(trajectories, permutations, graphs["graphs"][0])
-        #out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, aug_trajectories, T, batched_key,)
+        #out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, aug_trajectories, T, self.ownership_weight, batched_key,)
         
         #if self.best_buffer is not None:
         #    trajectories = self.best_buffer["bin_sequence"].astype(jnp.int32)
-        #    best_out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, trajectories, T, batched_key,)
+        #    best_out_dict, _ = self.pmap_environment_steps_force_samples(params, graphs, energy_graph_batch, trajectories, T, self.ownership_weight, batched_key,)
         #    best_out_dict["RL"]["bin_sequence"] = best_out_dict["bin_sequence"]
         #    key, subkey = jax.random.split(key)
         #    out_dict = self.merge_databuffers(out_dict, best_out_dict, shuffle=True, key=subkey)
@@ -309,7 +309,7 @@ class PPO(Base):
         start_backprob_time = time.time()
         (loss, (log_dict, key)), params, opt_state = self._update_policy(params, opt_state, graphs, out_dict["RL"], key)
         end_backprob_time = time.time()
-        # out_dict = jax.tree_map(lambda x: np.array(x), out_dict)
+        # out_dict = jax.tree_util.tree_map(lambda x: np.array(x), out_dict)
         # self.__init_Dataloader(out_dict)
         overall_backprob_time = end_backprob_time - start_backprob_time
 
@@ -351,7 +351,7 @@ class PPO(Base):
         return (loss, (log_dict, key)), params, opt_state
 
 
-    #@partial(jax.jit, static_argnums=(0,))
+    @partial(jax.jit, static_argnums=(0,))
     def loop_inner(self, params, opt_state, graphs, RL_buffer, key, split_diff_arr, split_state_arr):
         batch_dict, key = select_time_indices(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
         key, subkey = jax.random.split(key)
@@ -360,7 +360,7 @@ class PPO(Base):
         return (loss, (loss_dict, key)), params, opt_state
 
 
-    @partial(jax.jit, static_argnums=(0,3,4))
+    @partial(jax.jit, static_argnums=0, static_argnames=("deterministic", "force_samples"))
     def scan_body(self, scan_dict, y, deterministic: bool, force_samples: bool = False):
         i = scan_dict["step"]
         T = scan_dict["T"]
@@ -437,8 +437,8 @@ class PPO(Base):
         out_dict["spin_logits_next"] = spin_logits_next
         return scan_dict, out_dict
 
-    @partial(jax.jit, static_argnums=(0,6))
-    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, key, mode):
+    @partial(jax.jit, static_argnums=(0,7))
+    def _environment_steps_scan(self, params, graphs, energy_graph_batch, T, ownership_floor, key, mode):
         ### TDOD cahnge rewards to non exact expectation rewards
         print("scan function is being jitted")
         if(mode == "train"):
@@ -486,7 +486,7 @@ class PPO(Base):
         solution_prob_min_factor = jax.ops.segment_min(solution_spins_last_step, node_gr_idx, graphs["graphs"][0].graph.n_node.shape[0])[:-1]
 
         X_next = scan_dict["X_prev"]#
-        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, key)
+        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, ownership_floor, key)
         energy_reward = -energy_step
 
         noise_rewards = scan_dict["noise_rewards"]
@@ -548,8 +548,8 @@ class PPO(Base):
                     }
         return log_dict, key
     
-    @partial(jax.jit, static_argnums=(0,7))
-    def _environment_steps_scan_force_samples(self, params, graphs, energy_graph_batch, Xs_over_different_steps, T, key, mode):
+    @partial(jax.jit, static_argnums=(0,8))
+    def _environment_steps_scan_force_samples(self, params, graphs, energy_graph_batch, Xs_over_different_steps, T, ownership_floor, key, mode):
         ### TDOD cahnge rewards to non exact expectation rewards
         print("scan function is being jitted")
         N_basis_states = Xs_over_different_steps.shape[2]
@@ -595,7 +595,7 @@ class PPO(Base):
         solution_prob_min_factor = jax.ops.segment_min(solution_spins_last_step, node_gr_idx, graphs["graphs"][0].graph.n_node.shape[0])[:-1]
 
         X_next = scan_dict["X_prev"]#
-        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, key)
+        energy_step, Hb, best_X_0, key, energy_dict = self._get_energy_step(energy_graph_batch, X_next, node_gr_idx, ownership_floor, key)
         energy_reward = -energy_step
 
         noise_rewards = scan_dict["noise_rewards"]
@@ -689,7 +689,7 @@ class PPO(Base):
         return relaxed_entropies_per_graph[...,0]
 
     @partial(jax.jit, static_argnums=(0,))
-    def _get_energy_step(self, jraph_graph, X_0, node_gr_idx, key):
+    def _get_energy_step(self, jraph_graph, X_0, node_gr_idx, ownership_floor, key):
         if(self.proj_method == "feasible"):
             best_X_0, Hb, relaxed_energies_per_graph = self.vmapped_energy_feasible(jraph_graph, X_0)
             Hb = jnp.mean(jnp.abs(Hb))
@@ -697,7 +697,7 @@ class PPO(Base):
             best_X_0, relaxed_energies_per_graph, Hb_per_graph = self.vmapped_energy_CE(jraph_graph, X_0, node_gr_idx)
             Hb = jnp.mean(jnp.abs(Hb_per_graph[:-1]))
         else:
-            relaxed_energies_per_graph, energy_dict, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx)
+            relaxed_energies_per_graph, energy_dict, Hb_per_graph = self.vmapped_relaxed_energy(jraph_graph, X_0, node_gr_idx, ownership_floor)
             best_X_0 = X_0
             Hb = jnp.mean(jnp.abs(Hb_per_graph)[:-1])
             energy_dict = {k: v[:-1] for k, v in energy_dict.items()}
@@ -706,7 +706,9 @@ class PPO(Base):
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_energy_reward_relaxed(self, jraph_graph, spin_logits, node_gr_idx):
-        relaxed_energies_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(jraph_graph, spin_logits, node_gr_idx)
+        relaxed_energies_per_graph, _, _ = self.vmapped_relaxed_energy_for_Loss(
+            jraph_graph, spin_logits, node_gr_idx, self.ownership_weight
+        )
         return relaxed_energies_per_graph[...,0]
 
 

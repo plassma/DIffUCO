@@ -128,7 +128,7 @@ if(__name__ == "__main__"):
 
             scan_mlp = ScanMLP(n_layers, n_carry, n_hidden)
             params = scan_mlp.init(random.PRNGKey(1), carry_dict, xs)
-            print(jax.tree_map(lambda x: x.shape, params))
+            print(jax.tree_util.tree_map(lambda x: x.shape, params))
 
             measure_time_reps = 20
 
