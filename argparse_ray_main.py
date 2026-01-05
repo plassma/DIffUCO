@@ -152,7 +152,7 @@ def meanfield_run():
         if args.EnergyFunction == "MIS":
             run(flexible_config = {"jit": False, "dataset_name": "RB_iid_100", "problem_name": "MIS", "edge_updates": False, "mode_node_edge": "node", "n_diffusion_steps": 3}, overwrite = True)
         else:
-            run(flexible_config = {"load_only_params": args.load_only_params, "node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "T_explore": args.T_explore, "anneal_explore_period": args.anneal_explore_period, "explore_fraction": args.explore_fraction, "embedding_dim": args.embedding_dim}, overwrite = True) # "load_wandb_id": "oz5t74ww"
+            run(flexible_config = {"load_only_params": args.load_only_params, "node_transformer_num_layers": args.node_transformer_layers, "N_equil": args.N_equil, "AnnealSchedule": args.AnnealSchedule, "use_sample": args.use_sample, "jit": args.jit, "dataset_name": "HCP_dummy", "problem_name": "HCP", "edge_updates": True, "N_anneal": args.N_anneal[0], "load_wandb_id": args.load_wandb_id, "n_diffusion_steps": args.n_diffusion_steps[0], "minib_diff_steps": args.minib_diff_steps, "minib_basis_states": args.minib_basis_states, "N_basis_states": args.n_basis_states[0], "train_mode": args.train_mode, "T_max": args.temps[0], "T_target": args.T_target, "T_explore": args.T_explore, "anneal_explore_period": args.anneal_explore_period, "explore_fraction": args.explore_fraction, "embedding_dim": args.embedding_dim, "lr": args.lrs[0], "min_lr": args.lrs[0] / 10}, overwrite = True) # "load_wandb_id": "oz5t74ww"
     elif(args.multi_gpu):
         detect_and_run_for_loops()
     # else:
@@ -366,7 +366,7 @@ def run( flexible_config, overwrite = True):
         "node_transformer_dropout_rate": 0.0,
         "sample_groupwise": False,
         "transformer_type": "linear",
-        "sample_multiplier": 2,
+        "sample_multiplier": 1,
         "anneal_cycle_length": 200,
         "ownership_weight": 1.0,
         "energy_weights": {
@@ -374,8 +374,8 @@ def run( flexible_config, overwrite = True):
             "energy_things_per_cabinet": 1.0,
             "energy_cabinets_per_room": 1.0,
             "energy_order_violations": 3.0,
-            "energy_order_violations_cabinets": .0,
-            "energy_order_violations_rooms": .0,
+            "energy_order_violations_cabinets": 0.,
+            "energy_order_violations_rooms": 0.,
             "exp_cabinets_things_rooms": 2.0,
         }
     }

@@ -181,7 +181,7 @@ class HCProblem:
 	
 def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=None, solution_nodes = None, verbose=False, meta_graph=None):
 	if solution_nodes is not None:
-		solution_nodes = solution_nodes[meta_graph.globals["node_types"][0] >= 0]
+		solution_nodes = solution_nodes[(node_types if node_types is not None else meta_graph.globals["node_types"][0]) >= 0]
 		offset_node_types = meta_graph.globals["offset_per_node_type"]
 		while offset_node_types.ndim > 1:
 			offset_node_types = offset_node_types[0]
@@ -200,11 +200,6 @@ def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=Non
 	vertex_label_appendix = []
 	vertex_color_appendix = []
 
-
-	if include_legend:
-		plot_graph.add_vertices(4)
-		vertex_color_appendix = [VERTEX_COLORS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
-		vertex_label_appendix = [VERTEX_LABELS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
 
 	mismatches = -1
 
@@ -247,6 +242,13 @@ def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=Non
 
 	
 		print(f"Mismatches: {mismatches}")
+	
+	node_types = node_types[:len(plot_graph.vs)]
+
+	if include_legend:
+		plot_graph.add_vertices(4)
+		vertex_color_appendix = [VERTEX_COLORS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
+		vertex_label_appendix = [VERTEX_LABELS[t] for t in list(VERTEX_LABELS.keys())[:-1]]
 
 	edge_colors = ["black" if node_types[e[0]] == 2 and node_types[e[1]] == 3 else "grey" for e in edges]
 	edge_widths = [3 if node_types[e[0]] == 2 and node_types[e[1]] == 3 else 2 for e in edges]
@@ -354,6 +356,3 @@ class HCPDatasetGenerator(BaseDatasetGenerator):
 					indexed_solution_dict[key] = solutions[key][idx]
 			self.save_instance_solution(indexed_solution_dict, idx)
 		self.save_solutions(solutions)
-
-
-

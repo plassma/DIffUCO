@@ -79,7 +79,7 @@ class HCPEnergyClass(BaseEnergyClass):
         ).astype(jnp.float32)
 
         total_energy = (
-            self.energy_weights["energy_ownerships"] * ownership_weight * (energy_ownerships / meta_graph.meta["things"]) ** 1 + 
+            self.energy_weights["energy_ownerships"] * ownership_weight * (energy_ownerships / meta_graph.meta["things"]) ** 2 + 
             self.energy_weights["energy_things_per_cabinet"] * energy_things_per_cabinet / meta_graph.meta["things"] + 
             self.energy_weights["energy_cabinets_per_room"] * energy_cabinets_per_room / meta_graph.meta["cabinets"] + 
             jnp.sqrt(self.energy_weights["energy_order_violations"] *  energy_order_violations_things / expected_num_inversions(meta_graph.meta["things"])) +
@@ -90,13 +90,15 @@ class HCPEnergyClass(BaseEnergyClass):
             "energy_ownerships": energy_ownerships,
             "energy_things_per_cabinet": energy_things_per_cabinet,
             "energy_cabinets_per_room": energy_cabinets_per_room,
-            "energy_order_violations": energy_order_violations_things,
-            "weighted_ownerships": self.energy_weights["energy_ownerships"] * ownership_weight * energy_ownerships / meta_graph.meta["things"],
+            "energy_order_violations_things": energy_order_violations_things,
+            "energy_order_violations_cabinets": energy_order_violations_cabinets,
+            "energy_order_violations_rooms": energy_order_violations_rooms,
+            "weighted_ownerships": self.energy_weights["energy_ownerships"] * ownership_weight * (energy_ownerships / meta_graph.meta["things"]) ** 2,
             "weighted_things_per_cabinet": self.energy_weights["energy_things_per_cabinet"] * energy_things_per_cabinet / meta_graph.meta["things"],
-            "weighted_cabinets_per_room": self.energy_weights["energy_cabinets_per_room"] * energy_cabinets_per_room / meta_graph.meta["cabinets"] ,
-            "weighted_order_violations": self.energy_weights["energy_order_violations"] * energy_order_violations_things / expected_num_inversions(meta_graph.meta["things"]),
-            "weighted_order_violations_cabinets": self.energy_weights["energy_order_violations_cabinets"] * energy_order_violations_cabinets / meta_graph.meta["cabinets"] **2,
-            "weighted_order_violations_rooms": self.energy_weights["energy_order_violations_rooms"] * energy_order_violations_rooms / meta_graph.meta["rooms"] **2,
+            "weighted_cabinets_per_room": self.energy_weights["energy_cabinets_per_room"] * energy_cabinets_per_room / meta_graph.meta["cabinets"],
+            "weighted_order_violations_things": jnp.sqrt(self.energy_weights["energy_order_violations"] *  energy_order_violations_things / expected_num_inversions(meta_graph.meta["things"])),
+            "weighted_order_violations_cabinets": jnp.sqrt(self.energy_weights["energy_order_violations_cabinets"] *  energy_order_violations_cabinets / meta_graph.meta["cabinets"] ** 2),
+            "weighted_order_violations_rooms": jnp.sqrt(self.energy_weights["energy_order_violations_rooms"] * energy_order_violations_rooms / meta_graph.meta["rooms"] ** 2),
         }
         return total_energy, breakdown, energy_per_node
 

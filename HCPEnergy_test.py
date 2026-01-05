@@ -4,19 +4,12 @@ import jax.numpy as jnp
 import numpy as np
 from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot
 from Data.LoadGraphDataset import SolutionDatasetLoader
-<<<<<<< Updated upstream
-from house_config import compute_node_graph_indices, pad_energy_graph, sample_prior_state
-import argparse
-import os
-=======
-from EnergyFunctions.HCPEnergy_conti import HCPEnergyClassContinuous
 from house_config import compute_node_graph_indices, pad_energy_graph, sample_prior_state
 import argparse
 import os
 import itertools
 
 from house_config.utils import prior_logits_for_graph
->>>>>>> Stashed changes
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -76,10 +69,7 @@ if __name__ == "__main__":
     }
 
     energy_fn = HCPEnergyClass(base_config)
-<<<<<<< Updated upstream
-=======
-    cont_energy_fn = HCPEnergyClassContinuous(base_config)
->>>>>>> Stashed changes
+
     dataset_loader = SolutionDatasetLoader(
         config=base_config,
         dataset=args.dataset,
@@ -97,11 +87,7 @@ if __name__ == "__main__":
 
     dataset_stats = _build_dataset_statistics(dataloader)
 
-<<<<<<< Updated upstream
-    batch = next(iter(dataloader))
-=======
     batch = next(x for i,x in enumerate(iter(dataloader)) if i==0)
->>>>>>> Stashed changes
     graph_with_meta = batch["energy_graph"][0]
     key = jax.random.PRNGKey(args.sample_seed)
     raw_sample, _, key = sample_prior_state(graph_with_meta, key)
@@ -124,15 +110,11 @@ if __name__ == "__main__":
     prior_sample = np.full((total_nodes,), -1)
     #prior_sample[15:65] = raw_sample[15:65]
     prior_sample = raw_sample[:-1]
-    plot(None, node_types, "prior_nodes.png", solution_nodes=prior_sample, meta_graph=graph_with_meta)
+    plot(None, node_types[:-1], "prior_nodes.png", solution_nodes=prior_sample, meta_graph=graph_with_meta, include_legend=True)
 
-<<<<<<< Updated upstream
-=======
     sample_logits = prior_logits_for_graph(graph_with_meta)
     energy_fn.calculate_Energy(energy_graph, energy_graph.globals["solution_nodes"].squeeze(), node_gr_idx)
-    cont_energy_fn.calculate_Energy(energy_graph, jax.nn.one_hot(energy_graph.globals["solution_nodes"].squeeze(), energy_graph.meta["cabinets"]), node_gr_idx)
-
->>>>>>> Stashed changes
+    
     assert energy_fn.calculate_Energy(energy_graph, energy_graph.globals["solution_nodes"].squeeze(), node_gr_idx)[0].sum() == 0
     energy, violations, hb = energy_fn.calculate_Energy(energy_graph, raw_sample.astype(jnp.int32), node_gr_idx)
     print(f"Loaded dataset='{args.dataset}' mode='{args.mode}' sample={args.sample_idx}")

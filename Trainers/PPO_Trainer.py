@@ -11,6 +11,9 @@ import time
 import optax
 from utils import MovingAverages
 from jax import nn
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh
+from jax.sharding import PartitionSpec as P
 ### TODO use RL environments to make it possible to project solutions onto feasible solutions!
 
 class PPO(Base):
@@ -54,6 +57,7 @@ class PPO(Base):
         self.n_diff_batches = self.n_diffusion_steps // self.n_diff_bs
         self.n_state_batches = self.N_basis_states // self.n_state_bs
         self.n_devices = len(jax.devices())
+        self.mesh = Mesh(jax.devices(), ('device',))
         self._init_index_arrays()
 
         self.best_buffer = None
@@ -89,10 +93,25 @@ class PPO(Base):
 
     @partial(jax.jit, static_argnums=(0,))
     def loss_backward(self, params, opt_state, graphs, batch_dict, key):
+        def squeeze(x):
+            if hasattr(x, 'ndim') and x.ndim > 0 and x.shape[0] == 1:
+                return jnp.squeeze(x, axis=0)
+            return x
+
+        params = jax.tree_util.tree_map(squeeze, params)
+        opt_state = jax.tree_util.tree_map(squeeze, opt_state)
+        graphs = jax.tree_util.tree_map(squeeze, graphs)
+        batch_dict = jax.tree_util.tree_map(squeeze, batch_dict)
+        key = squeeze(key)
+
         (loss, (log_dict, key)), grad = self.PPO_loss_grad(params, graphs, batch_dict, key)
         grad = jax.lax.pmean(grad, axis_name='device')
         params, opt_state = self.__update_params(params, grad, opt_state)
-        return (loss, (log_dict, key)), params, opt_state
+
+        def expand(x):
+            if x is None: return None
+            return jnp.expand_dims(x, axis=0)
+        return jax.tree_util.tree_map(expand, ((loss, (log_dict, key)), params, opt_state))
 
     @partial(jax.jit, static_argnums=(0,))
     def __update_params(self, params, grads, opt_state):
@@ -356,7 +375,25 @@ class PPO(Base):
         batch_dict, key = select_time_indices(graphs["graphs"][0].graph, RL_buffer, split_diff_arr, split_state_arr, key)
         key, subkey = jax.random.split(key)
         batched_key = jax.random.split(subkey, num=len(jax.devices()))
-        (loss, (loss_dict, _)), params, opt_state = self.pmap_PPO_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
+        
+        def get_spec(x):
+            return P('device') if x is not None else None
+
+        in_specs = jax.tree_util.tree_map(get_spec, (params, opt_state, graphs, batch_dict, batched_key))
+        
+        sliced_inputs = jax.tree_util.tree_map(lambda x: x[0:1] if x is not None else None, (params, opt_state, graphs, batch_dict, batched_key))
+        abstract_out = jax.eval_shape(self.loss_backward_no_sync, *sliced_inputs)
+        out_specs = jax.tree_util.tree_map(get_spec, abstract_out)
+
+        sharded_loss_backward = shard_map(
+            self.loss_backward,
+            mesh=self.mesh,
+            in_specs=in_specs,
+            out_specs=out_specs,
+            check_rep=False
+        )
+
+        (loss, (loss_dict, _)), params, opt_state = sharded_loss_backward(params, opt_state, graphs, batch_dict, batched_key)
         return (loss, (loss_dict, key)), params, opt_state
 
 
@@ -656,6 +693,26 @@ class PPO(Base):
                     "spin_log_probs": spin_log_probs,
                     }
         return log_dict, key
+    
+    def loss_backward_no_sync(self, params, opt_state, graphs, batch_dict, key):
+        def squeeze(x):
+            if hasattr(x, 'ndim') and x.ndim > 0 and x.shape[0] == 1:
+                return jnp.squeeze(x, axis=0)
+            return x
+
+        params = jax.tree_util.tree_map(squeeze, params)
+        opt_state = jax.tree_util.tree_map(squeeze, opt_state)
+        graphs = jax.tree_util.tree_map(squeeze, graphs)
+        batch_dict = jax.tree_util.tree_map(squeeze, batch_dict)
+        key = squeeze(key)
+
+        (loss, (log_dict, key)), grad = self.PPO_loss_grad(params, graphs, batch_dict, key)
+        params, opt_state = self.__update_params(params, grad, opt_state)
+
+        def expand(x):
+            if x is None: return None
+            return jnp.expand_dims(x, axis=0)
+        return jax.tree_util.tree_map(expand, ((loss, (log_dict, key)), params, opt_state))
 
     @partial(jax.jit, static_argnums=(0,))
     def _get_noise_distr_step(self, jraph_graph, X_prev, X_next, t_idx, node_gr_idx, T,  noise_rewards_arr):
