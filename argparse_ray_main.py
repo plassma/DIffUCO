@@ -377,6 +377,7 @@ def run( flexible_config, overwrite = True):
             "energy_order_violations_cabinets": 0.,
             "energy_order_violations_rooms": 0.,
             "exp_cabinets_things_rooms": 2.0,
+            "order_severity": True
         }
     }
     

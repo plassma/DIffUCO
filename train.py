@@ -880,7 +880,7 @@ class TrainMeanField:
 			loss, (log_dict, _) = self.TrainerClass.evaluation_step(self.params, graph_batch, energy_graph_batch, self.T, batched_key, mode = mode, epoch = epoch, epochs = self.epochs)
 
 			with tempfile.NamedTemporaryFile(suffix=".png") as target:
-				plot(None, graph_batch["graphs"][0].graph.globals["node_types"][0],target.name, solution_nodes=log_dict["X_0"][0, :, 0, 0], meta_graph=graph_batch["graphs"][0])
+				plot(None, graph_batch["graphs"][0].graph.globals["node_types"][0, :-1],target.name, solution_nodes=log_dict["X_0"][0, :-1, 0, 0], meta_graph=graph_batch["graphs"][0])
 				wandb.log({"random sample": wandb.Image(target.name)}, commit=False, step=epoch)
 
 

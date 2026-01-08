@@ -2,7 +2,7 @@ from EnergyFunctions import HCPEnergyClass
 import jax
 import jax.numpy as jnp
 import numpy as np
-from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot
+from DatasetCreator.loadGraphDatasets.HCPDatasetGenerator import plot, plot_graph_flat
 from Data.LoadGraphDataset import SolutionDatasetLoader
 from house_config import compute_node_graph_indices, pad_energy_graph, sample_prior_state
 import argparse
@@ -105,12 +105,16 @@ if __name__ == "__main__":
 
     node_types = np.array(energy_graph.globals["node_types"].squeeze())
     plot(None, node_types[:-1], "solution_nodes.png", solution_nodes=energy_graph.globals["solution_nodes"].squeeze()[:-1], meta_graph=graph_with_meta)
+    plot_graph_flat(energy_graph.globals["solution_nodes"].squeeze()[:-1], node_types[None, :-1], clip_after_per_type=None, target="solution_flat.png")
+    plot_graph_flat(energy_graph.globals["solution_nodes"].squeeze()[:-1], node_types[None, :-1], clip_after_per_type=5, target="solution_flat_clip.png")
 
     raw_sample = raw_sample.astype(np.int32).squeeze()
     prior_sample = np.full((total_nodes,), -1)
     #prior_sample[15:65] = raw_sample[15:65]
     prior_sample = raw_sample[:-1]
     plot(None, node_types[:-1], "prior_nodes.png", solution_nodes=prior_sample, meta_graph=graph_with_meta, include_legend=True)
+    plot_graph_flat(prior_sample, node_types[None, :-1], clip_after_per_type=None, target="prior_flat.png")
+    plot_graph_flat(prior_sample, node_types[None, :-1], clip_after_per_type=5, target="prior_flat_clip.png")
 
     sample_logits = prior_logits_for_graph(graph_with_meta)
     energy_fn.calculate_Energy(energy_graph, energy_graph.globals["solution_nodes"].squeeze(), node_gr_idx)

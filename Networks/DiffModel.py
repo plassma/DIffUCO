@@ -125,9 +125,11 @@ class DiffModel(nn.Module):
 		self.vmap_get_sinusoidal_positional_encoding = jax.vmap(get_sinusoidal_positional_encoding, in_axes=(0, None))
 		### TODO random node feature key is different during eval and sample, force them to be the same?
 
-		self.W_k = nn.Sequential([nn.Dense(features=self.embedding_dim * 2, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
-		self.W_q = nn.Sequential([nn.Dense(features=self.embedding_dim * 2, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
-		self.W_v = nn.Sequential([nn.Dense(features=self.embedding_dim * 2, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
+		self.W_k = nn.Sequential([nn.Dense(features=self.embedding_dim * 4, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
+		self.W_q = nn.Sequential([nn.Dense(features=self.embedding_dim * 4, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
+		self.W_v = nn.Sequential([nn.Dense(features=self.embedding_dim * 4, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
+
+		self.W_v1 = nn.Sequential([nn.Dense(features=self.embedding_dim * 4, dtype=dtype), nn.gelu, nn.Dense(features=self.embedding_dim, dtype=dtype)])
 		self.value_mlp = ValueMLP(n_features_list=[self.embedding_dim * 4, self.embedding_dim * 2, 1], dtype=dtype)
 
 		self.time_step_emb = nn.Embed(num_embeddings=self.n_diffusion_steps, features=8, dtype=dtype)
@@ -161,16 +163,18 @@ class DiffModel(nn.Module):
 
 		embeddings = jnp.concat([embeddings, node_types_emb, nth_of_type_emb], axis = -1)
 
-		bernoulli_embeddings = jnp.repeat(embeddings[:, jnp.newaxis, :], 1, axis = -2)
-		embeddings_aranged_for_nodes = embeddings[jraph_graph_list["graphs"][0].globals["neighbours_per_node"]]
+		
+		embeddings_aranged_for_nodes = embeddings[jraph_graph_list["graphs"][0].globals["neighbours_per_node"]] # 0-5: rooms, 5-15: cabinets, 15-65: things (cabinetets), 65-115: things (persons)
 
 		queries = self.W_q(embeddings)
 		keys = self.W_k(embeddings_aranged_for_nodes)
-		values = self.W_v(embeddings_aranged_for_nodes)
+		score_values = self.W_v(embeddings_aranged_for_nodes)
 
-		scores = jnp.einsum('nd,ncd->nc', queries, keys) / jnp.sqrt(queries.shape[-1])
-		out_dict = {}
-		out_dict = self.HeadModel(jraph_graph_list, bernoulli_embeddings, out_dict)
+
+		score_embeddings = keys * score_values
+		scores = jnp.einsum('nd,ncd->nc', queries, keys) / jnp.sqrt(queries.shape[-1]) #score_embeddings
+		#out_dict = {}
+		#out_dict = self.HeadModel(jraph_graph_list, bernoulli_embeddings, out_dict)
 		#out_dict["spin_logits"].shape (71, 1, 2)
 		#out_dict["Values"].shape (2,)
 
@@ -195,10 +199,12 @@ class DiffModel(nn.Module):
 
 		attn_weights = jnp.exp(spin_logits[:, 0, :])
 		attn_weights = attn_weights / jnp.clip(jnp.sum(attn_weights, axis=-1, keepdims=True), a_min=1e-9)
-		attn_out = jnp.einsum('nc,ncd->nd', attn_weights, values)
+		value_values = self.W_v1(embeddings_aranged_for_nodes)
+		attn_out = jnp.einsum('nc,ncd->nd', attn_weights, value_values) # attn_weights.shape: (116, 10) value_values.shape: (116, 10, 32), attn_out.shape: (116, 32)
 		
 		node_graph_idx, n_graph, n_node = self.get_graph_info(jraph_graph_list)
-		value_emb = global_graph_aggr(attn_out[:, None], node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
+		#value_emb = global_graph_aggr(attn_out[:, None], node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
+		value_emb = global_graph_aggr(embeddings[:, None], node_graph_idx, n_graph) / jnp.sqrt(n_node[..., None, None])
 		Values = self.value_mlp(value_emb)[..., 0, 0]
 
 

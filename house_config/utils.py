@@ -136,8 +136,8 @@ def calculate_capacity_counts(
     }
 
 
-def calculate_order_violations(meta_graph, bins: jnp.ndarray, what="things") -> jnp.ndarray:
-    """Count inversions in `bins`, JIT-compatible."""
+def calculate_order_violations(meta_graph, bins: jnp.ndarray, what="things", include_severity=True) -> jnp.ndarray:
+    """Return severity-weighted inversions in `bins` (weight = x_i - x_j), JIT-compatible."""
     if what == "things":
         offset = meta_graph.meta["offset_things_cabinets"]
         n = meta_graph.meta["things"]
@@ -157,7 +157,13 @@ def calculate_order_violations(meta_graph, bins: jnp.ndarray, what="things") -> 
     i = idx[:, None]
     j = idx[None, :]
 
-    return (i < j) & (x[:, None] > x[None, :])
+    inversion_mask = (i < j) & (x[:, None] > x[None, :])
+    severity = x[:, None] - x[None, :]  # positive where mask is True
+
+    if not include_severity:
+        severity = jnp.ones_like(severity)
+
+    return jnp.where(inversion_mask, severity, 0)
 
 
 def compute_node_graph_indices(graph) -> Tuple[jnp.ndarray, int, int]:

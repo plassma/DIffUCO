@@ -11,6 +11,7 @@ import numpy as np
 import igraph as ig
 import matplotlib.pyplot as plt
 from GraphWithMeta import GraphWithMeta
+from matplotlib.colors import ListedColormap
 
 def to_shape(a, shape, pad_value=-1):
 	a = np.array(a)
@@ -265,6 +266,153 @@ def plot(igraph, node_types, target, include_legend=False, bin_solution_edge=Non
 	ig.plot(plot_graph, vertex_label=vertex_labels, target=target, vertex_color=vertex_colors,edge_color=edge_colors, edge_width=edge_widths) # vertex_color=vertex_colors,edge_color=edge_colors
 
 	return mismatches
+
+def plot_graph_flat(
+    value_arr,
+    type_arr=None,
+    type_to_color={0: "red", 1: "yellow", 2: "cyan", 3: "green", -1: "gray"},
+    box_size=1,      # inches per cell (controls box size)
+    text_ratio=0.5,    # fraction of cell height used for font size
+    clip_after_per_type=None,  # max number of consecutive nodes of the same type to show
+    target=None
+):
+    """
+    Plot an integer array as colored boxes with numbers inside.
+
+    Parameters
+    ----------
+    value_arr : array-like of ints, shape (H, W) or (N,)
+        The integers to show as text inside the boxes.
+    type_arr : array-like of ints, optional
+        Same shape as value_arr. Determines the color of each box
+        (e.g. node types). If None, value_arr is used.
+    type_to_color : dict[int, str] or list/tuple of color strings, optional
+        - If dict: maps each type value -> color (name or hex).
+        - If list/tuple: used in order of sorted unique types.
+          (len must be >= number of unique types)
+    box_size : float, optional
+        Size of each cell in inches (both width & height).
+    text_ratio : float, optional
+        Font size as fraction of cell height (0–1).
+    clip_after_per_type : int or None, optional
+        If set, only the first N consecutive nodes of the same type are shown.
+        Additional nodes of that consecutive type are collapsed into a single
+        placeholder box containing "...".
+    """
+    value_arr = np.asarray(value_arr)
+
+    # Allow 1D arrays -> single row
+    if value_arr.ndim == 1:
+        value_arr = value_arr[np.newaxis, :]
+
+    if type_arr is None:
+        type_arr = value_arr.copy()
+    else:
+        type_arr = np.asarray(type_arr)
+        if type_arr.ndim == 1:
+            type_arr = type_arr[np.newaxis, :]
+        if type_arr.shape != value_arr.shape:
+            raise ValueError("type_arr must have same shape as value_arr")
+
+    if clip_after_per_type is not None:
+        if clip_after_per_type < 0:
+            raise ValueError("clip_after_per_type must be non-negative")
+
+        values_flat = value_arr.reshape(-1).tolist()
+        types_flat = type_arr.reshape(-1).tolist()
+
+        clipped_values = []
+        clipped_types = []
+
+        idx = 0
+        while idx < len(values_flat):
+            current_type = types_flat[idx]
+            run_end = idx + 1
+            while run_end < len(values_flat) and types_flat[run_end] == current_type:
+                run_end += 1
+
+            run_len = run_end - idx
+            keep = min(run_len, clip_after_per_type)
+
+            if keep:
+                clipped_values.extend(values_flat[idx:idx + keep])
+                clipped_types.extend(types_flat[idx:idx + keep])
+
+            if run_len > clip_after_per_type:
+                clipped_values.append("...")
+                clipped_types.append(-1)
+
+            idx = run_end
+
+        value_arr = np.asarray(clipped_values, dtype=object)[np.newaxis, :]
+        type_arr = np.asarray(clipped_types, dtype=int)[np.newaxis, :]
+
+    H, W = value_arr.shape
+
+    # Unique node types and mapping to 0..K-1 for colormap
+    unique_types, inv = np.unique(type_arr, return_inverse=True)
+    inv = inv.reshape(H, W)
+    K = len(unique_types)
+
+    # Build colors for each type
+    if type_to_color is None:
+        # default: use a discrete colormap
+        cmap_base = plt.get_cmap("tab20", K)
+        colors = [cmap_base(i) for i in range(K)]
+    else:
+        if isinstance(type_to_color, dict):
+            colors = []
+            for t in unique_types:
+                if t in type_to_color:
+                    colors.append(type_to_color[t])
+                elif t == -1:
+                    colors.append("gray")
+                else:
+                    raise KeyError(f"No color specified for type {t}")
+        else:
+            # assume list/tuple matching the number of unique types
+            if len(type_to_color) < K:
+                raise ValueError("Not enough colors for unique types")
+            colors = list(type_to_color[:K])
+
+    cmap = ListedColormap(colors)
+
+    # Figure size so each cell has box_size inches
+    figsize = (W * box_size, H * box_size)
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Show colored boxes
+    ax.imshow(inv, cmap=cmap, interpolation="nearest", aspect="equal")
+
+    # Draw grid lines around cells
+    ax.set_xticks(np.arange(-0.5, W, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, H, 1), minor=True)
+    ax.grid(which="minor", linestyle="-", linewidth=1)
+    ax.tick_params(
+        which="both",
+        bottom=False, left=False,
+        labelbottom=False, labelleft=False
+    )
+
+    # Compute a reasonable font size from cell size
+    # 1 inch = 72 points; each cell is box_size inches.
+    fontsize = 72 * box_size * text_ratio
+
+    # Put the integers as text in each cell
+    for (i, j), v in np.ndenumerate(value_arr):
+        ax.text(
+            j, i, str(v),
+            ha="center", va="center",
+            color="black",
+            fontsize=fontsize,
+        )
+
+    plt.tight_layout()
+
+    if target is not None:
+        plt.savefig(target)
+    else:
+        plt.show()
 
 	
 
